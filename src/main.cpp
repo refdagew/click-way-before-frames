@@ -43,6 +43,11 @@ namespace {
         uint64_t tick = 0;
         float tickRemainder = 0.f;
         int activeShift = 0;
+        int pressStartTick = -1;
+        int tapHoldTicks = 12;
+        int robotHoldTicks = 12;
+        bool pressWasRobot = false;
+        bool trackedHeld = false;
     };
 
     std::array<PlayerBuffer, 2> s_players;
@@ -146,6 +151,11 @@ namespace {
         state.activeShift = 0;
         state.tickRemainder = 0.f;
         state.tick = 0;
+        state.pressStartTick = -1;
+        state.tapHoldTicks = 12;
+        state.robotHoldTicks = 12;
+        state.pressWasRobot = false;
+        state.trackedHeld = false;
     }
 
     void destroyGhosts() {
@@ -369,6 +379,7 @@ namespace {
         int button,
         int delay,
         int horizon,
+        int releaseAfter,
         uint32_t& work,
         uint32_t maxWork,
         std::chrono::steady_clock::time_point deadline
@@ -385,6 +396,7 @@ namespace {
         for (int tick = 0; tick < delay; ++tick) {
             if (!ghostStep(layer, ghost, work, maxWork, deadline)) {
                 s_simulating = false;
+                restorePredictionWorld();
                 if (s_unsupportedInteraction) return TestResult::Unsupported;
                 if (std::chrono::steady_clock::now() >= deadline || work > maxWork) return TestResult::BudgetExceeded;
                 return TestResult::Dies;
@@ -397,10 +409,13 @@ namespace {
 
         int airborneTicks = 0;
         int groundedTicks = 0;
-        const bool landingBased = !ghost->m_isShip && !ghost->m_isBird && !ghost->m_isDart && !ghost->m_isSwing;
-        const int landingConfirm = ghost->m_isSpider ? 12 : (ghost->m_isBall ? 8 : 3);
+        const bool landingBased = !ghost->m_isShip && !ghost->m_isDart && !ghost->m_isSwing;
+        const int landingConfirm = ghost->m_isSpider ? 12 : (ghost->m_isBall || ghost->m_isBird || ghost->m_isRobot ? 8 : 3);
 
         for (int tick = 0; tick < horizon; ++tick) {
+            if (down && releaseAfter >= 0 && tick == releaseAfter) {
+                ghost->releaseButton(asPlayerButton(button));
+            }
             if (!ghostStep(layer, ghost, work, maxWork, deadline)) {
                 s_simulating = false;
                 restorePredictionWorld();
@@ -414,7 +429,7 @@ namespace {
             }
             else if (airborneTicks >= (ghost->m_isBall ? 2 : 6)) {
                 ++groundedTicks;
-                if (landingBased && groundedTicks >= landingConfirm) {
+                if (landingBased && (releaseAfter < 0 || tick >= releaseAfter) && groundedTicks >= landingConfirm) {
                     s_simulating = false;
                     restorePredictionWorld();
                     return TestResult::Survives;
@@ -429,7 +444,7 @@ namespace {
 
     // Returns a positive tick count only when the cloned player survives after
     // applying the same input later. Zero means "send it normally".
-    int findSafeDelay(PlayLayer* layer, PlayerObject* real, int index, bool down, int button) {
+    int findSafeDelay(PlayLayer* layer, PlayerObject* real, int index, bool down, int button, int releaseAfter) {
         const int limit = configuredLimit();
         if (!layer || !real || limit <= 0 || real->m_isDead || !canPredictButton(layer, button)) {
             return 0;
@@ -453,14 +468,14 @@ namespace {
 
         // First check the input exactly as requested. The horizon is the same
         // shared value as the delay limit, regardless of the current game mode.
-        auto immediate = testDelay(layer, real, ghost, down, button, 0, limit, work, maxWork, deadline);
+        auto immediate = testDelay(layer, real, ghost, down, button, 0, limit, releaseAfter, work, maxWork, deadline);
         if (immediate == TestResult::Survives) return 0;
         if (immediate == TestResult::BudgetExceeded || immediate == TestResult::Unsupported) return 0;
 
         // Search from the smallest correction upward, keeping the first working
         // offset. Each candidate starts from a fresh copy of the real player's state.
         for (int delay = 1; delay <= limit; ++delay) {
-            auto result = testDelay(layer, real, ghost, down, button, delay, limit, work, maxWork, deadline);
+            auto result = testDelay(layer, real, ghost, down, button, delay, limit, releaseAfter, work, maxWork, deadline);
             if (result == TestResult::Survives) return delay;
             if (result == TestResult::BudgetExceeded || result == TestResult::Unsupported) break;
         }
@@ -635,6 +650,22 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             return;
         }
 
+        // Learn the user's actual tap length from real input edges. A press trial
+        // then includes a representative release instead of assuming every button
+        // remains down for the entire prediction horizon.
+        if (down && !state.trackedHeld) {
+            state.pressStartTick = static_cast<int>(state.tick);
+            state.pressWasRobot = real->m_isRobot;
+            state.trackedHeld = true;
+        }
+        else if (!down && state.trackedHeld && state.pressStartTick >= 0) {
+            const int duration = std::clamp(static_cast<int>(state.tick) - state.pressStartTick, 1, 240);
+            int& estimate = state.pressWasRobot ? state.robotHoldTicks : state.tapHoldTicks;
+            estimate = std::clamp((estimate * 3 + duration) / 4, 1, 240);
+            state.pressStartTick = -1;
+            state.trackedHeld = false;
+        }
+
         // Once an early input is queued, keep the same offset for its matching
         // release and any inputs made while that hold is pending.
         if (state.activeShift > 0) {
@@ -642,7 +673,11 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             return;
         }
 
-        const int delay = findSafeDelay(layer, real, index, down, button);
+        int releaseAfter = -1;
+        if (down && !real->m_isShip && !real->m_isDart && !real->m_isSwing) {
+            releaseAfter = real->m_isRobot ? state.robotHoldTicks : state.tapHoldTicks;
+        }
+        const int delay = findSafeDelay(layer, real, index, down, button, releaseAfter);
         if (delay > 0) {
             enqueueInput(state, down, button, isPlayer1, delay);
             return;
