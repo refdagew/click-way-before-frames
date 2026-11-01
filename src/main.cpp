@@ -65,6 +65,8 @@ namespace {
     bool s_unsupportedInteraction = false;
     bool s_injecting = false;
     float s_tickDuration = TICK_SECONDS;
+    int s_simTick = 0;
+    int s_simDeathTick = -1;
 
     struct ObjectRollback {
         GameObject* object = nullptr;
@@ -443,10 +445,14 @@ namespace {
             return false;
         }
 
+        ++s_simTick;
         ghost->update(s_tickDuration);
         ghost->updateRotation(s_tickDuration);
         if (!s_simDied && !ghost->m_isDead) {
             layer->checkCollisions(ghost, s_tickDuration, false);
+        }
+        if ((s_simDied || ghost->m_isDead) && s_simDeathTick < 0) {
+            s_simDeathTick = s_simTick;
         }
         return !s_simDied && !ghost->m_isDead && !s_unsupportedInteraction;
     }
@@ -494,6 +500,7 @@ namespace {
         int delay,
         int horizon,
         int releaseAfter,
+        int& deathTick,
         uint32_t& work,
         uint32_t maxWork,
         std::chrono::steady_clock::time_point deadline
@@ -501,6 +508,9 @@ namespace {
         restorePredictionWorld();
         s_objectRollback.clear();
         s_recordedObjects.clear();
+        deathTick = -1;
+        s_simTick = 0;
+        s_simDeathTick = -1;
         seedGhost(ghost, real);
         s_simGhost = ghost;
         s_simDied = false;
@@ -513,6 +523,7 @@ namespace {
                 restorePredictionWorld();
                 if (s_unsupportedInteraction) return TestResult::Unsupported;
                 if (std::chrono::steady_clock::now() >= deadline || work > maxWork) return TestResult::BudgetExceeded;
+                deathTick = s_simDeathTick;
                 return TestResult::Dies;
             }
         }
@@ -535,6 +546,7 @@ namespace {
                 restorePredictionWorld();
                 if (s_unsupportedInteraction) return TestResult::Unsupported;
                 if (std::chrono::steady_clock::now() >= deadline || work > maxWork) return TestResult::BudgetExceeded;
+                deathTick = s_simDeathTick;
                 return TestResult::Dies;
             }
             if (!ghost->m_isOnGround) {
@@ -582,16 +594,35 @@ namespace {
 
         // First check the input exactly as requested. The horizon is the same
         // shared value as the delay limit, regardless of the current game mode.
-        auto immediate = testDelay(layer, real, ghost, down, button, 0, limit, releaseAfter, work, maxWork, deadline);
+        int immediateDeathTick = -1;
+        auto immediate = testDelay(layer, real, ghost, down, button, 0, limit, releaseAfter,
+            immediateDeathTick, work, maxWork, deadline);
         if (immediate == TestResult::Survives) return 0;
         if (immediate == TestResult::BudgetExceeded || immediate == TestResult::Unsupported) return 0;
 
         // Search from the smallest correction upward, keeping the first working
         // offset. Each candidate starts from a fresh copy of the real player's state.
+        int lastDeathTick = immediateDeathTick;
+        int repeatedDeathTick = 0;
         for (int delay = 1; delay <= limit; ++delay) {
-            auto result = testDelay(layer, real, ghost, down, button, delay, limit, releaseAfter, work, maxWork, deadline);
+            int candidateDeathTick = -1;
+            auto result = testDelay(layer, real, ghost, down, button, delay, limit, releaseAfter,
+                candidateDeathTick, work, maxWork, deadline);
             if (result == TestResult::Survives) return delay;
             if (result == TestResult::BudgetExceeded || result == TestResult::Unsupported) break;
+
+            // Four consecutive delay trials that reach the same absolute collision
+            // tick have moved the click past the hazard being corrected. The crash
+            // is now caused by the next obstacle, so testing still-later timings is
+            // redundant for this search pass.
+            if (candidateDeathTick >= 0 && candidateDeathTick == lastDeathTick) {
+                ++repeatedDeathTick;
+            }
+            else {
+                lastDeathTick = candidateDeathTick;
+                repeatedDeathTick = candidateDeathTick >= 0 ? 1 : 0;
+            }
+            if (repeatedDeathTick >= 4) break;
         }
         return 0;
     }
