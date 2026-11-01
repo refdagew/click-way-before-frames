@@ -13,7 +13,9 @@
 #include <cmath>
 #include <cstdint>
 #include <deque>
+#include <optional>
 #include <string>
+#include <utility>
 #include <unordered_set>
 #include <vector>
 
@@ -66,6 +68,9 @@ namespace {
     bool s_unsupportedInteraction = false;
     bool s_injecting = false;
     float s_tickDuration = TICK_SECONDS;
+    using ActivatedObjectState = decltype(std::declval<GJBaseGameLayer&>().m_gameState.m_activatedObjectIDs);
+    std::optional<ActivatedObjectState> s_activationSnapshot;
+    int s_commandIndexSnapshot = 0;
     int s_simTick = 0;
     int s_simDeathTick = -1;
 
@@ -154,6 +159,11 @@ namespace {
         }
         s_objectRollback.clear();
         s_recordedObjects.clear();
+        if (s_playLayer && s_activationSnapshot) {
+            s_playLayer->m_gameState.m_activatedObjectIDs = *s_activationSnapshot;
+            s_playLayer->m_gameState.m_commandIndex = s_commandIndexSnapshot;
+        }
+        s_activationSnapshot.reset();
         if (s_playLayer && s_playLayer->m_effectManager) {
             for (auto it = s_groupToggleRollback.rbegin(); it != s_groupToggleRollback.rend(); ++it) {
                 s_playLayer->m_effectManager->toggleGroup(it->group, it->active);
@@ -592,6 +602,8 @@ namespace {
         restorePredictionWorld();
         s_objectRollback.clear();
         s_recordedObjects.clear();
+        s_activationSnapshot = layer->m_gameState.m_activatedObjectIDs;
+        s_commandIndexSnapshot = layer->m_gameState.m_commandIndex;
         deathTick = -1;
         s_simTick = 0;
         s_simDeathTick = -1;
