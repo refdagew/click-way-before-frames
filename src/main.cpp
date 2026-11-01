@@ -1075,13 +1075,13 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
 // Enhanced move/rotate triggers enqueue commands on the live game layer. Their
 // dispatch functions are inline in GD 2.2081 and cannot be patched directly.
 // Intercept the effect callback before it can write those actions into live state.
-class $modify(CWBF_GameObject, GameObject) {
+class $modify(CWBF_EffectGameObject, EffectGameObject) {
     void triggerObject(GJBaseGameLayer* layer, int uniqueID, gd::vector<int> const* remapKeys) {
         if (s_simulating && typeinfo_cast<EnhancedTriggerObject*>(this)) {
             s_unsupportedInteraction = true;
             return;
         }
-        GameObject::triggerObject(layer, uniqueID, remapKeys);
+        EffectGameObject::triggerObject(layer, uniqueID, remapKeys);
     }
 };
 
