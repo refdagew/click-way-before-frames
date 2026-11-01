@@ -25,10 +25,11 @@ namespace {
     constexpr float TICK_SECONDS = 1.f / 240.f;
     constexpr char const* SAVED_LIMIT_KEY = "shared-early-click-limit";
 
-    // A single safety budget prevents a long prediction from freezing the game.
-    // The delay cap and the simulation horizon still come from the same slider.
-    constexpr auto SEARCH_BUDGET = std::chrono::milliseconds(8);
-    constexpr uint32_t MAX_SIMULATION_STEPS = 120000;
+    // Larger user-selected horizons receive more computation time, while a hard
+    // ceiling protects the game from a pathological level or endless trigger chain.
+    constexpr int MIN_SEARCH_BUDGET_MS = 12;
+    constexpr int MAX_SEARCH_BUDGET_MS = 100;
+    constexpr uint32_t MAX_SIMULATION_STEPS = 1000000;
 
     struct QueuedInput {
         uint64_t dueTick = 0;
@@ -580,7 +581,9 @@ namespace {
         if (!ghost) return 0;
 
         const auto started = std::chrono::steady_clock::now();
-        const auto deadline = started + SEARCH_BUDGET;
+        const int budgetMs = MIN_SEARCH_BUDGET_MS +
+            (limit * (MAX_SEARCH_BUDGET_MS - MIN_SEARCH_BUDGET_MS)) / MAX_LIMIT_TICKS;
+        const auto deadline = started + std::chrono::milliseconds(budgetMs);
         // Reserve enough work for a complete ascending scan at modest
         // settings: each candidate runs its delay prefix plus one full horizon.
         // Large user-selected horizons remain bounded to avoid freezing GD.
