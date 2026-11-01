@@ -1156,11 +1156,10 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
     void spawnGroup(int group, bool ordered, double delay, gd::vector<int> const& remapKeys,
         int triggerID, int controlID) {
         if (s_simulating) {
-            if (ordered || delay > 0.0 || !remapKeys.empty()) {
-                s_unsupportedInteraction = true;
-                return;
-            }
-            setSimulatedGroupState(this, group, true);
+            // Spawn actions can relocate/recreate objects and may be delayed or ordered.
+            // Without a private spawned-object world, stop this trial instead of pretending
+            // that enabling the group's existing objects is an equivalent simulation.
+            s_unsupportedInteraction = true;
             return;
         }
         GJBaseGameLayer::spawnGroup(group, ordered, delay, remapKeys, triggerID, controlID);
