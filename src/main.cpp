@@ -71,6 +71,7 @@ namespace {
     };
     std::vector<ObjectRollback> s_objectRollback;
     std::unordered_set<GameObject*> s_recordedObjects;
+    std::unordered_set<GameObject*> s_simTouchedObjects;
 
     void rememberObject(GameObject* object) {
         if (!object || !s_recordedObjects.insert(object).second) return;
@@ -103,6 +104,7 @@ namespace {
         }
         s_objectRollback.clear();
         s_recordedObjects.clear();
+        s_simTouchedObjects.clear();
     }
 
     void setSimulatedGroupState(GJBaseGameLayer* layer, int group, bool active) {
@@ -684,6 +686,78 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         }
 
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
+    }
+
+    void collisionCheckObjects(PlayerObject* player, gd::vector<GameObject*>* objects, int objectCount, float dt) {
+        if (!s_simulating || !isGhost(player) || !objects) {
+            GJBaseGameLayer::collisionCheckObjects(player, objects, objectCount, dt);
+            return;
+        }
+
+        static gd::vector<GameObject*> collisionObjects;
+        collisionObjects.clear();
+        if (collisionObjects.capacity() < static_cast<size_t>(objectCount)) {
+            collisionObjects.reserve(objectCount);
+        }
+
+        const auto playerRect = player->getObjectRect();
+        for (int i = 0; i < objectCount; ++i) {
+            auto* object = (*objects)[i];
+            if (!object) continue;
+
+            auto type = object->m_objectType;
+            const bool specialPortal =
+                type == GameObjectType::RegularSizePortal ||
+                type == GameObjectType::MiniSizePortal ||
+                type == GameObjectType::TeleportPortal;
+
+            if (!specialPortal || !playerRect.intersectsRect(object->getObjectRect())) {
+                collisionObjects.push_back(object);
+                continue;
+            }
+
+            // These portals are applied to the ghost itself and removed from the
+            // normal collision pass so GD cannot apply the same portal a second time.
+            if (!s_simTouchedObjects.insert(object).second) continue;
+
+            if (type == GameObjectType::RegularSizePortal || type == GameObjectType::MiniSizePortal) {
+                const bool mini = type == GameObjectType::MiniSizePortal;
+                if ((player->m_vehicleSize < 1.f) != mini) {
+                    player->togglePlayerScale(mini);
+                }
+                continue;
+            }
+
+            auto* portal = static_cast<TeleportPortalObject*>(object);
+            if (object->m_objectID == 749) {
+                continue; // orange endpoint is only a destination
+            }
+            if (object->m_objectID != 747) {
+                s_unsupportedInteraction = true;
+                continue;
+            }
+
+            double dx = 0.0;
+            double dy = portal->m_teleportYOffset;
+            if (portal->m_orangePortal && portal->m_orangePortal != portal) {
+                dx = portal->m_orangePortal->m_positionX - portal->m_positionX;
+                dy = portal->m_orangePortal->m_positionY - portal->m_positionY;
+            }
+            if (portal->m_ignoreX) dx = 0.0;
+            if (portal->m_ignoreY) dy = 0.0;
+
+            const auto shift = CCPoint { static_cast<float>(dx), static_cast<float>(dy) };
+            player->setPosition(player->getPosition() + shift);
+            player->m_position = player->m_position + shift;
+            player->m_lastPosition = player->m_lastPosition + shift;
+            player->m_isOnGround = false;
+            player->m_isOnGround2 = false;
+            player->playerTeleported();
+        }
+
+        GJBaseGameLayer::collisionCheckObjects(
+            player, &collisionObjects, static_cast<int>(collisionObjects.size()), dt
+        );
     }
 
     bool canBeActivatedByPlayer(PlayerObject* player, EffectGameObject* object) {
