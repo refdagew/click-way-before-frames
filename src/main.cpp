@@ -694,7 +694,7 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         return GJBaseGameLayer::canBeActivatedByPlayer(player, object);
     }
 
-    void playerTouchedRing(PlayerObject* player, GameObject* ring) {
+    void playerTouchedRing(PlayerObject* player, RingObject* ring) {
         if (s_simulating && isGhost(player)) {
             rememberObject(ring);
             GJBaseGameLayer::playerTouchedRing(player, ring);
@@ -782,7 +782,7 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         GJBaseGameLayer::gameEventTriggered(event, material, playerID);
     }
 
-    void pickupItem(GameObject* object) {
+    void pickupItem(EffectGameObject* object) {
         if (s_simulating) return;
         GJBaseGameLayer::pickupItem(object);
     }
