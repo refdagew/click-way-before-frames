@@ -46,7 +46,13 @@ namespace {
         int pressStartTick = -1;
         int tapHoldTicks = 12;
         int robotHoldTicks = 12;
+        int shipHoldTicks = 18;
+        int waveHoldTicks = 12;
+        int swingHoldTicks = 12;
         bool pressWasRobot = false;
+        bool pressWasShip = false;
+        bool pressWasWave = false;
+        bool pressWasSwing = false;
         bool trackedHeld = false;
     };
 
@@ -170,7 +176,13 @@ namespace {
         state.pressStartTick = -1;
         state.tapHoldTicks = 12;
         state.robotHoldTicks = 12;
+        state.shipHoldTicks = 18;
+        state.waveHoldTicks = 12;
+        state.swingHoldTicks = 12;
         state.pressWasRobot = false;
+        state.pressWasShip = false;
+        state.pressWasWave = false;
+        state.pressWasSwing = false;
         state.trackedHeld = false;
     }
 
@@ -672,12 +684,19 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         if (down && !state.trackedHeld) {
             state.pressStartTick = static_cast<int>(state.tick);
             state.pressWasRobot = real->m_isRobot;
+            state.pressWasShip = real->m_isShip;
+            state.pressWasWave = real->m_isDart;
+            state.pressWasSwing = real->m_isSwing;
             state.trackedHeld = true;
         }
         else if (!down && state.trackedHeld && state.pressStartTick >= 0) {
             const int duration = std::clamp(static_cast<int>(state.tick) - state.pressStartTick, 1, 240);
-            int& estimate = state.pressWasRobot ? state.robotHoldTicks : state.tapHoldTicks;
-            estimate = std::clamp((estimate * 3 + duration) / 4, 1, 240);
+            int* estimate = &state.tapHoldTicks;
+            if (state.pressWasRobot) estimate = &state.robotHoldTicks;
+            else if (state.pressWasShip) estimate = &state.shipHoldTicks;
+            else if (state.pressWasWave) estimate = &state.waveHoldTicks;
+            else if (state.pressWasSwing) estimate = &state.swingHoldTicks;
+            *estimate = std::clamp((*estimate * 3 + duration) / 4, 1, 240);
             state.pressStartTick = -1;
             state.trackedHeld = false;
         }
@@ -690,8 +709,12 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         }
 
         int releaseAfter = -1;
-        if (down && !real->m_isShip && !real->m_isDart && !real->m_isSwing) {
-            releaseAfter = real->m_isRobot ? state.robotHoldTicks : state.tapHoldTicks;
+        if (down) {
+            if (real->m_isRobot) releaseAfter = state.robotHoldTicks;
+            else if (real->m_isShip) releaseAfter = state.shipHoldTicks;
+            else if (real->m_isDart) releaseAfter = state.waveHoldTicks;
+            else if (real->m_isSwing) releaseAfter = state.swingHoldTicks;
+            else releaseAfter = state.tapHoldTicks;
         }
         const int delay = findSafeDelay(layer, real, index, down, button, releaseAfter);
         if (delay > 0) {
