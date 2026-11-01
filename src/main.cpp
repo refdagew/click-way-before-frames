@@ -171,6 +171,33 @@ namespace {
         return !s_simDied && !ghost->m_isDead && !s_unsupportedInteraction;
     }
 
+    int normalizedButton(int button) {
+        // Match GD's public button-ID normalization, including P2 variants.
+        switch (button) {
+            case 2: case 7: return 2;
+            case 3: case 8: return 3;
+            case 4: case 9: return 4;
+            case 5: case 10: return 5;
+            default: return 1;
+        }
+    }
+
+    bool canPredictButton(PlayLayer* layer, int button) {
+        const int normalized = normalizedButton(button);
+        if (normalized == 1) return true;
+        // Platformer has directional inputs in addition to jump. The same player
+        // simulation can evaluate those controls, so they share the exact slider.
+        return layer && layer->m_isPlatformer && (normalized == 2 || normalized == 3);
+    }
+
+    PlayerButton asPlayerButton(int button) {
+        switch (normalizedButton(button)) {
+            case 2: return PlayerButton::Left;
+            case 3: return PlayerButton::Right;
+            default: return PlayerButton::Jump;
+        }
+    }
+
     enum class TestResult {
         Survives,
         Dies,
@@ -263,33 +290,6 @@ namespace {
         }
         const auto due = state.tick + static_cast<uint64_t>(state.activeShift);
         state.inputs.push_back({ due, down, button, player2 });
-    }
-
-    int normalizedButton(int button) {
-        // Match GD's public button-ID normalization, including P2 variants.
-        switch (button) {
-            case 2: case 7: return 2;
-            case 3: case 8: return 3;
-            case 4: case 9: return 4;
-            case 5: case 10: return 5;
-            default: return 1;
-        }
-    }
-
-    bool canPredictButton(PlayLayer* layer, int button) {
-        const int normalized = normalizedButton(button);
-        if (normalized == 1) return true;
-        // Platformer has directional inputs in addition to jump. The same player
-        // simulation can evaluate those controls, so they share the exact slider.
-        return layer && layer->m_isPlatformer && (normalized == 2 || normalized == 3);
-    }
-
-    PlayerButton asPlayerButton(int button) {
-        switch (normalizedButton(button)) {
-            case 2: return PlayerButton::Left;
-            case 3: return PlayerButton::Right;
-            default: return PlayerButton::Jump;
-        }
     }
 
     void deliverInputs(PlayLayer* layer, int index) {
