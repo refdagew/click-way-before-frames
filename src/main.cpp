@@ -30,6 +30,7 @@ namespace {
     struct QueuedInput {
         uint64_t dueTick = 0;
         bool down = false;
+        int button = 1;
         bool player2 = false;
     };
 
@@ -180,6 +181,7 @@ namespace {
         PlayerObject* real,
         PlayerObject* ghost,
         bool down,
+        int button,
         int delay,
         int horizon,
         uint32_t& work,
@@ -201,8 +203,9 @@ namespace {
             }
         }
 
-        if (down) ghost->pushButton(PlayerButton::Jump);
-        else ghost->releaseButton(PlayerButton::Jump);
+        const auto playerButton = asPlayerButton(button);
+        if (down) ghost->pushButton(playerButton);
+        else ghost->releaseButton(playerButton);
 
         for (int tick = 0; tick < horizon; ++tick) {
             if (!ghostStep(layer, ghost, work, maxWork, deadline)) {
@@ -219,9 +222,9 @@ namespace {
 
     // Returns a positive tick count only when the cloned player survives after
     // applying the same input later. Zero means "send it normally".
-    int findSafeDelay(PlayLayer* layer, PlayerObject* real, int index, bool down) {
+    int findSafeDelay(PlayLayer* layer, PlayerObject* real, int index, bool down, int button) {
         const int limit = configuredLimit();
-        if (!layer || !real || limit <= 0 || real->m_isDead || layer->m_isPlatformer) {
+        if (!layer || !real || limit <= 0 || real->m_isDead || !canPredictButton(layer, button)) {
             return 0;
         }
 
@@ -238,26 +241,42 @@ namespace {
 
         // First check the input exactly as requested. The horizon is the same
         // shared value as the delay limit, regardless of the current game mode.
-        auto immediate = testDelay(layer, real, ghost, down, 0, limit, work, maxWork, deadline);
+        auto immediate = testDelay(layer, real, ghost, down, button, 0, limit, work, maxWork, deadline);
         if (immediate == TestResult::Survives) return 0;
         if (immediate == TestResult::BudgetExceeded || immediate == TestResult::Unsupported) return 0;
 
         // Search from the smallest correction upward, keeping the first working
         // offset. Each candidate starts from a fresh copy of the real player's state.
         for (int delay = 1; delay <= limit; ++delay) {
-            auto result = testDelay(layer, real, ghost, down, delay, limit, work, maxWork, deadline);
+            auto result = testDelay(layer, real, ghost, down, button, delay, limit, work, maxWork, deadline);
             if (result == TestResult::Survives) return delay;
             if (result == TestResult::BudgetExceeded || result == TestResult::Unsupported) break;
         }
         return 0;
     }
 
-    void enqueueInput(PlayerBuffer& state, bool down, bool player2, int newShift = 0) {
+    void enqueueInput(PlayerBuffer& state, bool down, int button, bool player2, int newShift = 0) {
         if (newShift > 0) {
             state.activeShift = std::max(state.activeShift, newShift);
         }
         const auto due = state.tick + static_cast<uint64_t>(state.activeShift);
-        state.inputs.push_back({ due, down, player2 });
+        state.inputs.push_back({ due, down, button, player2 });
+    }
+
+    int normalizedButton(int button) {
+        return GJBaseGameLayer::buttonIDToButton(button);
+    }
+
+    bool canPredictButton(PlayLayer* layer, int button) {
+        const int normalized = normalizedButton(button);
+        if (normalized == 1) return true;
+        // Platformer has directional inputs in addition to jump. The same player
+        // simulation can evaluate those controls, so they share the exact slider.
+        return layer && layer->m_isPlatformer && (normalized == 2 || normalized == 3);
+    }
+
+    PlayerButton asPlayerButton(int button) {
+        return static_cast<PlayerButton>(normalizedButton(button));
     }
 
     void deliverInputs(PlayLayer* layer, int index) {
@@ -267,7 +286,7 @@ namespace {
             state.inputs.pop_front();
 
             s_injecting = true;
-            layer->handleButton(input.down, 1, input.player2);
+            layer->handleButton(input.down, input.button, input.player2);
             s_injecting = false;
 
             // The delayed hold is complete only when its matching release reaches
@@ -398,7 +417,7 @@ class $modify(CWBF_PlayerObject, PlayerObject) {
 
 class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
     void handleButton(bool down, int button, bool isPlayer1) {
-        if (s_simulating || s_injecting || button != 1) {
+        if (s_simulating || s_injecting) {
             GJBaseGameLayer::handleButton(down, button, isPlayer1);
             return;
         }
@@ -414,7 +433,7 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         auto* real = isPlayer1 ? layer->m_player1 : layer->m_player2;
         auto& state = s_players[index];
 
-        if (!real || !state.ghost || layer->m_isPlatformer) {
+        if (!real || !state.ghost || !canPredictButton(layer, button)) {
             GJBaseGameLayer::handleButton(down, button, isPlayer1);
             return;
         }
@@ -422,13 +441,13 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         // Once an early input is queued, keep the same offset for its matching
         // release and any inputs made while that hold is pending.
         if (state.activeShift > 0) {
-            enqueueInput(state, down, !isPlayer1);
+            enqueueInput(state, down, button, !isPlayer1);
             return;
         }
 
-        const int delay = findSafeDelay(layer, real, index, down);
+        const int delay = findSafeDelay(layer, real, index, down, button);
         if (delay > 0) {
-            enqueueInput(state, down, !isPlayer1, delay);
+            enqueueInput(state, down, button, !isPlayer1, delay);
             return;
         }
 
