@@ -842,10 +842,11 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
                 objectID == 203 || objectID == 1334;
             const bool unsupportedPortal =
                 type == GameObjectType::DualPortal ||
-                type == GameObjectType::SoloPortal ||
+                type == GameObjectType::SoloPortal;
+            const bool visualMirrorPortal =
                 type == GameObjectType::NormalMirrorPortal ||
                 type == GameObjectType::InverseMirrorPortal;
-            const bool specialPortal = speedPortal || unsupportedPortal ||
+            const bool specialPortal = speedPortal || unsupportedPortal || visualMirrorPortal ||
                 type == GameObjectType::RegularSizePortal ||
                 type == GameObjectType::MiniSizePortal ||
                 type == GameObjectType::TeleportPortal;
@@ -861,6 +862,11 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
 
             if (unsupportedPortal) {
                 s_unsupportedInteraction = true;
+                continue;
+            }
+            if (visualMirrorPortal) {
+                // Mirror portals change the view direction, not the player's collision
+                // path or vehicle physics. Consume them without changing the ghost.
                 continue;
             }
 
