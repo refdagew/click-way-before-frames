@@ -848,6 +848,11 @@ class $modify(CWBF_PlayLayer, PlayLayer) {
         PlayLayer::resetLevel();
     }
 
+    void createParticle(int id, char const* key, int frame, cocos2d::tCCPositionType positionType) {
+        if (s_simulating) return;
+        PlayLayer::createParticle(id, key, frame, positionType);
+    }
+
     void onQuit() {
         destroyGhosts();
         PlayLayer::onQuit();
