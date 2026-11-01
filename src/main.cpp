@@ -272,7 +272,7 @@ namespace {
 
             // The delayed hold is complete only when its matching release reaches
             // the game. Until then, later inputs retain the same offset.
-            if (!input.down) {
+            if (!input.down && state.inputs.empty()) {
                 state.activeShift = 0;
             }
         }
@@ -435,7 +435,7 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         GJBaseGameLayer::handleButton(down, button, isPlayer1);
     }
 
-    bool canBeActivatedByPlayer(PlayerObject* player, GameObject* object) {
+    bool canBeActivatedByPlayer(PlayerObject* player, EffectGameObject* object) {
         if (s_simulating && isGhost(player)) {
             // This first engine intentionally declines to simulate object effects
             // (rings, pads, portals, triggers). We never let a speculative ghost
@@ -444,11 +444,6 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             return false;
         }
         return GJBaseGameLayer::canBeActivatedByPlayer(player, object);
-    }
-
-    void playerTouchedObject(PlayerObject* player, GameObject* object) {
-        if (s_simulating && isGhost(player)) return;
-        GJBaseGameLayer::playerTouchedObject(player, object);
     }
 };
 
