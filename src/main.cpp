@@ -3,6 +3,7 @@
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
 #include <Geode/modify/PlayLayer.hpp>
+#include <Geode/modify/EffectGameObject.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/SliderNode.hpp>
 
@@ -1036,12 +1037,12 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
 // dispatch functions are inline in GD 2.2081 and cannot be patched directly.
 // Intercept the effect callback before it can write those actions into live state.
 class $modify(CWBF_EffectGameObject, EffectGameObject) {
-    void triggerObject(GJBaseGameLayer* layer) {
+    void triggerObject(GJBaseGameLayer* layer, int uniqueID, gd::vector<int> const* remapKeys) {
         if (s_simulating && typeinfo_cast<EnhancedTriggerObject*>(this)) {
             s_unsupportedInteraction = true;
             return;
         }
-        EffectGameObject::triggerObject(layer);
+        EffectGameObject::triggerObject(layer, uniqueID, remapKeys);
     }
 };
 
