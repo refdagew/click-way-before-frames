@@ -1108,6 +1108,7 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         if (s_simulating && isGhost(player)) {
             if (!portal) return;
             auto mode = portal->m_objectType;
+            player->switchedToMode(mode);
             if (player->m_isShip) player->toggleFlyMode(false, true);
             if (player->m_isBird) player->toggleBirdMode(false, true);
             if (player->m_isDart) player->toggleDartMode(false, true);
