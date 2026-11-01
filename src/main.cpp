@@ -899,11 +899,25 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
                 continue;
             }
 
+            TeleportPortalObject* destination = portal->m_orangePortal;
+            if (!destination && portal->m_targetGroupID > 0) {
+                auto* targets = layer->getGroup(portal->m_targetGroupID);
+                if (targets && targets->count() == 1) {
+                    destination = typeinfo_cast<TeleportPortalObject*>(targets->objectAtIndex(0));
+                }
+                // A multi-member destination group uses the game's random target
+                // selection. Do not invent a destination for the speculative run.
+                if (!destination) {
+                    s_unsupportedInteraction = true;
+                    continue;
+                }
+            }
+
             double dx = 0.0;
             double dy = portal->m_teleportYOffset;
-            if (portal->m_orangePortal && portal->m_orangePortal != portal) {
-                dx = portal->m_orangePortal->m_positionX - portal->m_positionX;
-                dy = portal->m_orangePortal->m_positionY - portal->m_positionY;
+            if (destination && destination != portal) {
+                dx = destination->m_positionX - portal->m_positionX;
+                dy = destination->m_positionY - portal->m_positionY;
             }
             if (portal->m_ignoreX) dx = 0.0;
             if (portal->m_ignoreY) dy = 0.0;
