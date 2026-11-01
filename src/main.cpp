@@ -182,9 +182,10 @@ namespace {
             object->m_positionX = it->positionX + offset.x;
             object->m_positionY = it->positionY + offset.y;
             object->setPosition({ it->position.x + offset.x, it->position.y + offset.y });
+            const float previousStep = std::max(0.f, step - 1.f);
             object->setLastPosition({
-                it->lastPosition.x + offset.x,
-                it->lastPosition.y + offset.y
+                it->lastPosition.x + it->velocity.x * previousStep,
+                it->lastPosition.y + it->velocity.y * previousStep
             });
             object->setObjectRectDirty(true);
             object->setOrientedRectDirty(true);
@@ -220,7 +221,7 @@ namespace {
         object->m_positionX += offset.x;
         object->m_positionY += offset.y;
         object->setPosition({ object->getPosition().x + offset.x, object->getPosition().y + offset.y });
-        object->setLastPosition({ previous.x + offset.x, previous.y + offset.y });
+        object->setLastPosition(previous);
         object->setObjectRectDirty(true);
         object->setOrientedRectDirty(true);
     }
