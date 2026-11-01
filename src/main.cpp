@@ -256,6 +256,14 @@ namespace {
         ghost->m_isRobot = real->m_isRobot;
         ghost->m_isSpider = real->m_isSpider;
         ghost->m_isSwing = real->m_isSwing;
+        ghost->m_isPlatformer = real->m_isPlatformer;
+        ghost->m_platformerXVelocity = real->m_platformerXVelocity;
+        ghost->m_platformerVelocityRelated = real->m_platformerVelocityRelated;
+        ghost->m_platformerMovingLeft = real->m_platformerMovingLeft;
+        ghost->m_platformerMovingRight = real->m_platformerMovingRight;
+        ghost->m_changedDirectionsTime = real->m_changedDirectionsTime;
+        ghost->m_maybeChangedDirectionAngle = real->m_maybeChangedDirectionAngle;
+        ghost->m_maybeGoingCorrectSlopeDirection = real->m_maybeGoingCorrectSlopeDirection;
         ghost->m_isGoingLeft = real->m_isGoingLeft;
         ghost->m_isSideways = real->m_isSideways;
         ghost->m_reverseSync = real->m_reverseSync;
@@ -750,7 +758,12 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             const bool speedPortal =
                 objectID == 200 || objectID == 201 || objectID == 202 ||
                 objectID == 203 || objectID == 1334;
-            const bool specialPortal = speedPortal ||
+            const bool unsupportedPortal =
+                type == GameObjectType::DualPortal ||
+                type == GameObjectType::SoloPortal ||
+                type == GameObjectType::NormalMirrorPortal ||
+                type == GameObjectType::InverseMirrorPortal;
+            const bool specialPortal = speedPortal || unsupportedPortal ||
                 type == GameObjectType::RegularSizePortal ||
                 type == GameObjectType::MiniSizePortal ||
                 type == GameObjectType::TeleportPortal;
@@ -763,6 +776,11 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             // These portals are applied to the ghost itself and removed from the
             // normal collision pass so GD cannot apply the same portal a second time.
             if (!s_simTouchedObjects.insert(object).second) continue;
+
+            if (unsupportedPortal) {
+                s_unsupportedInteraction = true;
+                continue;
+            }
 
             if (speedPortal) {
                 switch (objectID) {
@@ -925,14 +943,6 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             return;
         }
         GJBaseGameLayer::spawnGroup(group, ordered, delay, remapKeys, triggerID, controlID);
-    }
-
-    void moveObject(GameObject* object, double dx, double dy, bool lockPlayerY) {
-        if (s_simulating) {
-            s_unsupportedInteraction = true;
-            return;
-        }
-        GJBaseGameLayer::moveObject(object, dx, dy, lockPlayerY);
     }
 
     void moveAreaObject(GameObject* object, float dx, float dy) {
