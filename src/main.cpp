@@ -778,7 +778,7 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             if (type == GameObjectType::RegularSizePortal || type == GameObjectType::MiniSizePortal) {
                 const bool mini = type == GameObjectType::MiniSizePortal;
                 if ((player->m_vehicleSize < 1.f) != mini) {
-                    player->togglePlayerScale(mini);
+                    player->togglePlayerScale(mini, true);
                 }
                 continue;
             }
