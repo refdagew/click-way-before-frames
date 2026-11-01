@@ -943,30 +943,6 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         GJBaseGameLayer::moveAreaObject(object, dx, dy);
     }
 
-    void triggerRotateCommand(EnhancedTriggerObject* object) {
-        if (s_simulating) {
-            s_unsupportedInteraction = true;
-            return;
-        }
-        GJBaseGameLayer::triggerRotateCommand(object);
-    }
-
-    void triggerDynamicMoveCommand(EffectGameObject* object) {
-        if (s_simulating) {
-            s_unsupportedInteraction = true;
-            return;
-        }
-        GJBaseGameLayer::triggerDynamicMoveCommand(object);
-    }
-
-    void triggerDynamicRotateCommand(EffectGameObject* object) {
-        if (s_simulating) {
-            s_unsupportedInteraction = true;
-            return;
-        }
-        GJBaseGameLayer::triggerDynamicRotateCommand(object);
-    }
-
     void gameEventTriggered(GJGameEvent event, int material, int playerID) {
         if (s_simulating) return;
         GJBaseGameLayer::gameEventTriggered(event, material, playerID);
@@ -980,6 +956,20 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
     void updateCounters(int itemID, int value) {
         if (s_simulating) return;
         GJBaseGameLayer::updateCounters(itemID, value);
+    }
+};
+
+
+// Enhanced move/rotate triggers enqueue commands on the live game layer. Their
+// dispatch functions are inline in GD 2.2081 and cannot be patched directly.
+// Intercept the effect callback before it can write those actions into live state.
+class $modify(CWBF_EffectGameObject, EffectGameObject) {
+    void triggerObject(GJBaseGameLayer* layer) {
+        if (s_simulating && typeinfo_cast<EnhancedTriggerObject*>(this)) {
+            s_unsupportedInteraction = true;
+            return;
+        }
+        EffectGameObject::triggerObject(layer);
     }
 };
 
