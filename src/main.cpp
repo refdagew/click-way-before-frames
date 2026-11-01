@@ -264,7 +264,14 @@ namespace {
     }
 
     int normalizedButton(int button) {
-        return GJBaseGameLayer::buttonIDToButton(button);
+        // Match GD's public button-ID normalization, including P2 variants.
+        switch (button) {
+            case 2: case 7: return 2;
+            case 3: case 8: return 3;
+            case 4: case 9: return 4;
+            case 5: case 10: return 5;
+            default: return 1;
+        }
     }
 
     bool canPredictButton(PlayLayer* layer, int button) {
@@ -276,7 +283,11 @@ namespace {
     }
 
     PlayerButton asPlayerButton(int button) {
-        return static_cast<PlayerButton>(normalizedButton(button));
+        switch (normalizedButton(button)) {
+            case 2: return PlayerButton::Left;
+            case 3: return PlayerButton::Right;
+            default: return PlayerButton::Jump;
+        }
     }
 
     void deliverInputs(PlayLayer* layer, int index) {
