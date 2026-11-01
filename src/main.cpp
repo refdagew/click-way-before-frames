@@ -92,12 +92,8 @@ namespace {
 
     void rememberGroupToggle(GJBaseGameLayer* layer, int group) {
         if (!layer || !layer->m_effectManager || group < 0) return;
-        auto& toggles = layer->m_effectManager->m_groupToggled;
-        if (static_cast<size_t>(group) >= toggles.size() ||
-            !s_recordedGroupToggles.insert(group).second) {
-            return;
-        }
-        s_groupToggleRollback.push_back({ group, toggles[group] });
+        if (!s_recordedGroupToggles.insert(group).second) return;
+        s_groupToggleRollback.push_back({ group, layer->m_effectManager->isGroupEnabled(group) });
     }
 
     void rememberObject(GameObject* object) {
@@ -132,11 +128,8 @@ namespace {
         s_objectRollback.clear();
         s_recordedObjects.clear();
         if (s_playLayer && s_playLayer->m_effectManager) {
-            auto& toggles = s_playLayer->m_effectManager->m_groupToggled;
             for (auto it = s_groupToggleRollback.rbegin(); it != s_groupToggleRollback.rend(); ++it) {
-                if (it->group >= 0 && static_cast<size_t>(it->group) < toggles.size()) {
-                    toggles[it->group] = it->active;
-                }
+                s_playLayer->m_effectManager->toggleGroup(it->group, it->active);
             }
         }
         s_groupToggleRollback.clear();
@@ -151,10 +144,7 @@ namespace {
         if (!layer || group <= 0) return;
         rememberGroupToggle(layer, group);
         if (layer->m_effectManager) {
-            auto& toggles = layer->m_effectManager->m_groupToggled;
-            if (static_cast<size_t>(group) < toggles.size()) {
-                toggles[group] = active;
-            }
+            layer->m_effectManager->toggleGroup(group, active);
         }
         auto* objects = layer->getGroup(group);
         if (!objects) return;
