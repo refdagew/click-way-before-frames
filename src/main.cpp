@@ -220,6 +220,27 @@ namespace {
         state.trackedHeld = false;
     }
 
+    void cancelQueuedInputs(PlayLayer* layer, PlayerObject* player, int index) {
+        if (index < 0 || index >= static_cast<int>(s_players.size())) return;
+        auto& state = s_players[index];
+
+        // If the queued press already reached GD, make sure it is released before
+        // clearing the pending release. This avoids a held button leaking into retry.
+        if (layer && player) {
+            auto held = player->m_holdingButtons.find(static_cast<int>(PlayerButton::Jump));
+            if (held != player->m_holdingButtons.end() && held->second) {
+                s_injecting = true;
+                layer->handleButton(false, 1, index == 0);
+                s_injecting = false;
+            }
+        }
+
+        state.inputs.clear();
+        state.activeShift = 0;
+        state.trackedHeld = false;
+        state.pressStartTick = -1;
+    }
+
     void destroyGhosts() {
         s_simGhost = nullptr;
         s_simulating = false;
@@ -663,10 +684,14 @@ class $modify(CWBF_PlayLayer, PlayLayer) {
             player->m_isDead = true;
             return;
         }
+        const int index = playerIndex(player, this);
+        if (index >= 0) cancelQueuedInputs(this, player, index);
         PlayLayer::destroyPlayer(player, object);
     }
 
     void resetLevel() {
+        cancelQueuedInputs(this, m_player1, 0);
+        cancelQueuedInputs(this, m_player2, 1);
         for (auto& state : s_players) clearPlayerBuffer(state);
         PlayLayer::resetLevel();
     }
