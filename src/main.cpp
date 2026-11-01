@@ -72,6 +72,9 @@ namespace {
     std::vector<ObjectRollback> s_objectRollback;
     std::unordered_set<GameObject*> s_recordedObjects;
     std::unordered_set<GameObject*> s_simTouchedObjects;
+    std::unordered_set<GameObject*> s_simDisabledObjects;
+    std::unordered_set<GameObject*> s_simEnabledObjects;
+    std::unordered_set<GameObject*> s_collisionSeen;
 
     void rememberObject(GameObject* object) {
         if (!object || !s_recordedObjects.insert(object).second) return;
@@ -105,6 +108,9 @@ namespace {
         s_objectRollback.clear();
         s_recordedObjects.clear();
         s_simTouchedObjects.clear();
+        s_simDisabledObjects.clear();
+        s_simEnabledObjects.clear();
+        s_collisionSeen.clear();
     }
 
     void setSimulatedGroupState(GJBaseGameLayer* layer, int group, bool active) {
@@ -114,6 +120,14 @@ namespace {
         for (auto object : geode::cocos::CCArrayExt<GameObject, false>(objects)) {
             rememberObject(object);
             object->m_isGroupDisabled = !active;
+            if (active) {
+                s_simDisabledObjects.erase(object);
+                s_simEnabledObjects.insert(object);
+            }
+            else {
+                s_simEnabledObjects.erase(object);
+                s_simDisabledObjects.insert(object);
+            }
         }
     }
 
@@ -696,14 +710,17 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
 
         static gd::vector<GameObject*> collisionObjects;
         collisionObjects.clear();
-        if (collisionObjects.capacity() < static_cast<size_t>(objectCount)) {
-            collisionObjects.reserve(objectCount);
+        s_collisionSeen.clear();
+        if (collisionObjects.capacity() < static_cast<size_t>(objectCount) + s_simEnabledObjects.size()) {
+            collisionObjects.reserve(static_cast<size_t>(objectCount) + s_simEnabledObjects.size());
         }
+        s_collisionSeen.reserve(static_cast<size_t>(objectCount) + s_simEnabledObjects.size());
 
         const auto playerRect = player->getObjectRect();
         for (int i = 0; i < objectCount; ++i) {
             auto* object = (*objects)[i];
-            if (!object) continue;
+            if (!object || s_simDisabledObjects.contains(object)) continue;
+            s_collisionSeen.insert(object);
 
             auto type = object->m_objectType;
             const int objectID = object->m_objectID;
@@ -775,6 +792,20 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             player->m_isOnGround = false;
             player->m_isOnGround2 = false;
             player->playerTeleported();
+        }
+
+        // Groups enabled during a prediction are absent from the game's pre-filtered
+        // collision vector. Reinsert nearby members so the ghost sees newly enabled
+        // hazards and solids on its next physics step.
+        const auto ghostPosition = player->getPosition();
+        for (auto* object : s_simEnabledObjects) {
+            if (!object || s_simDisabledObjects.contains(object) || s_collisionSeen.contains(object)) continue;
+            if (std::abs(object->getPositionX() - ghostPosition.x) > 220.f ||
+                std::abs(object->getPositionY() - ghostPosition.y) > 220.f) {
+                continue;
+            }
+            s_collisionSeen.insert(object);
+            collisionObjects.push_back(object);
         }
 
         GJBaseGameLayer::collisionCheckObjects(
