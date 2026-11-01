@@ -938,7 +938,7 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
 
             TeleportPortalObject* destination = portal->m_orangePortal;
             if (!destination && portal->m_targetGroupID > 0) {
-                auto* targets = layer->getGroup(portal->m_targetGroupID);
+                auto* targets = this->getGroup(portal->m_targetGroupID);
                 if (targets && targets->count() == 1) {
                     destination = typeinfo_cast<TeleportPortalObject*>(targets->objectAtIndex(0));
                 }
