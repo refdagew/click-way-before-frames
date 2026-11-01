@@ -13,6 +13,8 @@
 #include <cstdint>
 #include <deque>
 #include <string>
+#include <unordered_set>
+#include <vector>
 
 using namespace geode::prelude;
 
@@ -50,6 +52,63 @@ namespace {
     bool s_simDied = false;
     bool s_unsupportedInteraction = false;
     bool s_injecting = false;
+    float s_tickDuration = TICK_SECONDS;
+
+    struct ObjectRollback {
+        GameObject* object = nullptr;
+        bool groupDisabled = false;
+        bool activated = false;
+        EffectGameObject* effect = nullptr;
+        bool effectActivated = false;
+        bool effectP1 = false;
+        bool effectP2 = false;
+        bool animationTriggered = false;
+    };
+    std::vector<ObjectRollback> s_objectRollback;
+    std::unordered_set<GameObject*> s_recordedObjects;
+
+    void rememberObject(GameObject* object) {
+        if (!object || !s_recordedObjects.insert(object).second) return;
+        ObjectRollback state;
+        state.object = object;
+        state.groupDisabled = object->m_isGroupDisabled;
+        state.activated = object->m_isActivated;
+        if (auto* effect = typeinfo_cast<EffectGameObject*>(object)) {
+            state.effect = effect;
+            state.effectActivated = effect->m_activated;
+            state.effectP1 = effect->m_activatedByPlayer1;
+            state.effectP2 = effect->m_activatedByPlayer2;
+            state.animationTriggered = effect->m_animationTriggered;
+        }
+        s_objectRollback.push_back(state);
+    }
+
+    void restorePredictionWorld() {
+        for (auto it = s_objectRollback.rbegin(); it != s_objectRollback.rend(); ++it) {
+            auto& state = *it;
+            if (!state.object) continue;
+            state.object->m_isGroupDisabled = state.groupDisabled;
+            state.object->m_isActivated = state.activated;
+            if (state.effect) {
+                state.effect->m_activated = state.effectActivated;
+                state.effect->m_activatedByPlayer1 = state.effectP1;
+                state.effect->m_activatedByPlayer2 = state.effectP2;
+                state.effect->m_animationTriggered = state.animationTriggered;
+            }
+        }
+        s_objectRollback.clear();
+        s_recordedObjects.clear();
+    }
+
+    void setSimulatedGroupState(GJBaseGameLayer* layer, int group, bool active) {
+        if (!layer || group <= 0) return;
+        auto* objects = layer->getGroup(group);
+        if (!objects) return;
+        for (auto object : geode::cocos::CCArrayExt<GameObject, false>(objects)) {
+            rememberObject(object);
+            object->m_isGroupDisabled = !active;
+        }
+    }
 
     int configuredLimit() {
         return std::clamp(
@@ -149,6 +208,102 @@ namespace {
         ghost->setScale(real->getScale());
         ghost->setContentSize(real->getContentSize());
 
+        // Preserve the mode-specific physics state that is not contained in the
+        // generic attribute copy: vehicle flags, directional state, velocity,
+        // gravity, slope contact, dash state and temporary physics modifiers.
+        ghost->m_isShip = real->m_isShip;
+        ghost->m_isBird = real->m_isBird;
+        ghost->m_isBall = real->m_isBall;
+        ghost->m_isDart = real->m_isDart;
+        ghost->m_isRobot = real->m_isRobot;
+        ghost->m_isSpider = real->m_isSpider;
+        ghost->m_isSwing = real->m_isSwing;
+        ghost->m_isGoingLeft = real->m_isGoingLeft;
+        ghost->m_isSideways = real->m_isSideways;
+        ghost->m_reverseSync = real->m_reverseSync;
+        ghost->m_reverseRelated = real->m_reverseRelated;
+        ghost->m_maybeReverseSpeed = real->m_maybeReverseSpeed;
+        ghost->m_maybeReverseAcceleration = real->m_maybeReverseAcceleration;
+        ghost->m_speedMultiplier = real->m_speedMultiplier;
+        ghost->m_gravity = real->m_gravity;
+        ghost->m_yStart = real->m_yStart;
+        ghost->m_totalTime = real->m_totalTime;
+        ghost->m_lastPosition = real->m_lastPosition;
+
+        ghost->m_yVelocity = real->m_yVelocity;
+        ghost->m_fallSpeed = real->m_fallSpeed;
+        ghost->m_yVelocityBeforeSlope = real->m_yVelocityBeforeSlope;
+        ghost->m_yVelocityRelated = real->m_yVelocityRelated;
+        ghost->m_yVelocityRelated3 = real->m_yVelocityRelated3;
+        ghost->m_groundYVelocity = real->m_groundYVelocity;
+        ghost->m_accelerationOrSpeed = real->m_accelerationOrSpeed;
+        ghost->m_isAccelerating = real->m_isAccelerating;
+        ghost->m_maybeIsFalling = real->m_maybeIsFalling;
+
+        ghost->m_isOnGround2 = real->m_isOnGround2;
+        ghost->m_isOnGround3 = real->m_isOnGround3;
+        ghost->m_isOnGround4 = real->m_isOnGround4;
+        ghost->m_stateOnGround = real->m_stateOnGround;
+        ghost->m_lastLandTime = real->m_lastLandTime;
+        ghost->m_lastJumpTime = real->m_lastJumpTime;
+        ghost->m_lastFlipTime = real->m_lastFlipTime;
+        ghost->m_lastSpiderFlipTime = real->m_lastSpiderFlipTime;
+        ghost->m_lastGroundedPos = real->m_lastGroundedPos;
+
+        ghost->m_isOnSlope = real->m_isOnSlope;
+        ghost->m_wasOnSlope = real->m_wasOnSlope;
+        ghost->m_slopeVelocity = real->m_slopeVelocity;
+        ghost->m_maybeUpsideDownSlope = real->m_maybeUpsideDownSlope;
+        ghost->m_currentSlope = real->m_currentSlope;
+        ghost->m_currentSlope2 = real->m_currentSlope2;
+        ghost->m_currentPotentialSlope = real->m_currentPotentialSlope;
+        ghost->m_isCollidingWithSlope = real->m_isCollidingWithSlope;
+        ghost->m_collidingWithSlopeId = real->m_collidingWithSlopeId;
+        ghost->m_slopeFlipGravityRelated = real->m_slopeFlipGravityRelated;
+        ghost->m_slopeAngle = real->m_slopeAngle;
+        ghost->m_slopeAngleRadians = real->m_slopeAngleRadians;
+        ghost->m_slopeRotation = real->m_slopeRotation;
+        ghost->m_currentSlopeYVelocity = real->m_currentSlopeYVelocity;
+        ghost->m_isCurrentSlopeTop = real->m_isCurrentSlopeTop;
+        ghost->m_slopeStartTime = real->m_slopeStartTime;
+        ghost->m_slopeEndTime = real->m_slopeEndTime;
+        ghost->m_slopeSlidingMaybeRotated = real->m_slopeSlidingMaybeRotated;
+
+        ghost->m_lastGroundObject = real->m_lastGroundObject;
+        ghost->m_preLastGroundObject = real->m_preLastGroundObject;
+        ghost->m_maybeLastGroundObject = real->m_maybeLastGroundObject;
+        ghost->m_collidedObject = real->m_collidedObject;
+        ghost->m_objectSnappedTo = real->m_objectSnappedTo;
+        ghost->m_snapDistance = real->m_snapDistance;
+        ghost->m_lastCollisionBottom = real->m_lastCollisionBottom;
+        ghost->m_lastCollisionTop = real->m_lastCollisionTop;
+        ghost->m_lastCollisionLeft = real->m_lastCollisionLeft;
+        ghost->m_lastCollisionRight = real->m_lastCollisionRight;
+        ghost->m_collidedTopMinY = real->m_collidedTopMinY;
+        ghost->m_collidedBottomMaxY = real->m_collidedBottomMaxY;
+        ghost->m_collidedLeftMaxX = real->m_collidedLeftMaxX;
+        ghost->m_collidedRightMinX = real->m_collidedRightMinX;
+
+        ghost->m_dashX = real->m_dashX;
+        ghost->m_dashY = real->m_dashY;
+        ghost->m_dashAngle = real->m_dashAngle;
+        ghost->m_dashStartTime = real->m_dashStartTime;
+        ghost->m_dashRing = real->m_dashRing;
+        ghost->m_dashFireFrame = real->m_dashFireFrame;
+
+        ghost->m_stateForce = real->m_stateForce;
+        ghost->m_stateForceVector = real->m_stateForceVector;
+        ghost->m_affectedByForces = real->m_affectedByForces;
+        ghost->m_stateBoostX = real->m_stateBoostX;
+        ghost->m_stateBoostY = real->m_stateBoostY;
+        ghost->m_stateNoStickX = real->m_stateNoStickX;
+        ghost->m_stateNoStickY = real->m_stateNoStickY;
+        ghost->m_stateHitHead = real->m_stateHitHead;
+        ghost->m_stateFlipGravity = real->m_stateFlipGravity;
+        ghost->m_stateNoAutoJump = real->m_stateNoAutoJump;
+        ghost->m_stateScale = real->m_stateScale;
+        ghost->m_maybeStateForce2 = real->m_maybeStateForce2;
+
         // copyAttributes carries the movement state; these fields explicitly restore
         // the held-button state, which determines ship/wave/swing movement and releases.
         ghost->m_holdingButtons = real->m_holdingButtons;
@@ -164,9 +319,10 @@ namespace {
             return false;
         }
 
-        ghost->update(TICK_SECONDS);
+        ghost->update(s_tickDuration);
+        ghost->updateRotation(s_tickDuration);
         if (!s_simDied && !ghost->m_isDead) {
-            layer->checkCollisions(ghost, TICK_SECONDS, false);
+            layer->checkCollisions(ghost, s_tickDuration, false);
         }
         return !s_simDied && !ghost->m_isDead && !s_unsupportedInteraction;
     }
@@ -217,6 +373,9 @@ namespace {
         uint32_t maxWork,
         std::chrono::steady_clock::time_point deadline
     ) {
+        restorePredictionWorld();
+        s_objectRollback.clear();
+        s_recordedObjects.clear();
         seedGhost(ghost, real);
         s_simGhost = ghost;
         s_simDied = false;
@@ -236,16 +395,35 @@ namespace {
         if (down) ghost->pushButton(playerButton);
         else ghost->releaseButton(playerButton);
 
+        int airborneTicks = 0;
+        int groundedTicks = 0;
+        const bool landingBased = !ghost->m_isShip && !ghost->m_isBird && !ghost->m_isDart && !ghost->m_isSwing;
+        const int landingConfirm = ghost->m_isSpider ? 12 : (ghost->m_isBall ? 8 : 3);
+
         for (int tick = 0; tick < horizon; ++tick) {
             if (!ghostStep(layer, ghost, work, maxWork, deadline)) {
                 s_simulating = false;
+                restorePredictionWorld();
                 if (s_unsupportedInteraction) return TestResult::Unsupported;
                 if (std::chrono::steady_clock::now() >= deadline || work > maxWork) return TestResult::BudgetExceeded;
                 return TestResult::Dies;
             }
+            if (!ghost->m_isOnGround) {
+                ++airborneTicks;
+                groundedTicks = 0;
+            }
+            else if (airborneTicks >= (ghost->m_isBall ? 2 : 6)) {
+                ++groundedTicks;
+                if (landingBased && groundedTicks >= landingConfirm) {
+                    s_simulating = false;
+                    restorePredictionWorld();
+                    return TestResult::Survives;
+                }
+            }
         }
 
         s_simulating = false;
+        restorePredictionWorld();
         return TestResult::Survives;
     }
 
@@ -421,7 +599,8 @@ class $modify(CWBF_PlayerObject, PlayerObject) {
             const int index = playerIndex(this, layer);
             if (index >= 0) {
                 auto& state = s_players[index];
-                state.tickRemainder += std::max(0.f, dt) * 240.f;
+                if (dt > 0.0001f && dt < 1.f) s_tickDuration = dt;
+                state.tickRemainder += std::max(0.f, dt) / s_tickDuration;
                 while (state.tickRemainder >= 1.f) {
                     state.tickRemainder -= 1.f;
                     ++state.tick;
@@ -474,13 +653,108 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
 
     bool canBeActivatedByPlayer(PlayerObject* player, EffectGameObject* object) {
         if (s_simulating && isGhost(player)) {
-            // This first engine intentionally declines to simulate object effects
-            // (rings, pads, portals, triggers). We never let a speculative ghost
-            // mutate the live level's shared objects.
-            s_unsupportedInteraction = true;
-            return false;
+            rememberObject(object);
+            return true;
         }
         return GJBaseGameLayer::canBeActivatedByPlayer(player, object);
+    }
+
+    void playerTouchedRing(PlayerObject* player, GameObject* ring) {
+        if (s_simulating && isGhost(player)) {
+            rememberObject(ring);
+            GJBaseGameLayer::playerTouchedRing(player, ring);
+            auto held = player->m_holdingButtons.find(static_cast<int>(PlayerButton::Jump));
+            if (held == player->m_holdingButtons.end() || !held->second) {
+                player->pushButton(PlayerButton::Jump);
+            }
+            return;
+        }
+        GJBaseGameLayer::playerTouchedRing(player, ring);
+    }
+
+    void flipGravity(PlayerObject* player, bool flip, bool noEffects) {
+        if (s_simulating && isGhost(player)) {
+            player->flipGravity(flip, true);
+            return;
+        }
+        GJBaseGameLayer::flipGravity(player, flip, noEffects);
+    }
+
+    void playerWillSwitchMode(PlayerObject* player, GameObject* portal) {
+        if (s_simulating && isGhost(player)) {
+            if (!portal) return;
+            auto mode = portal->m_objectType;
+            if (player->m_isShip) player->toggleFlyMode(false, true);
+            if (player->m_isBird) player->toggleBirdMode(false, true);
+            if (player->m_isDart) player->toggleDartMode(false, true);
+            if (player->m_isBall) player->toggleRollMode(false, true);
+            if (player->m_isRobot) player->toggleRobotMode(false, true);
+            if (player->m_isSpider) player->toggleSpiderMode(false, true);
+            if (player->m_isSwing) player->toggleSwingMode(false, true);
+
+            switch (mode) {
+                case GameObjectType::ShipPortal: player->toggleFlyMode(true, true); break;
+                case GameObjectType::UfoPortal: player->toggleBirdMode(true, true); break;
+                case GameObjectType::WavePortal: player->toggleDartMode(true, true); break;
+                case GameObjectType::BallPortal: player->toggleRollMode(true, true); break;
+                case GameObjectType::RobotPortal: player->toggleRobotMode(true, true); break;
+                case GameObjectType::SpiderPortal: player->toggleSpiderMode(true, true); break;
+                case GameObjectType::SwingPortal: player->toggleSwingMode(true, true); break;
+                case GameObjectType::CubePortal: break;
+                default: s_unsupportedInteraction = true; break;
+            }
+            return;
+        }
+        GJBaseGameLayer::playerWillSwitchMode(player, portal);
+    }
+
+    void toggleGroupTriggered(int group, bool activate, gd::vector<int> const& remapKeys,
+        int triggerID, int controlID) {
+        if (s_simulating) {
+            if (!remapKeys.empty()) {
+                s_unsupportedInteraction = true;
+                return;
+            }
+            setSimulatedGroupState(this, group, activate);
+            return;
+        }
+        GJBaseGameLayer::toggleGroupTriggered(group, activate, remapKeys, triggerID, controlID);
+    }
+
+    void toggleGroup(int group, bool activate) {
+        if (s_simulating) {
+            setSimulatedGroupState(this, group, activate);
+            return;
+        }
+        GJBaseGameLayer::toggleGroup(group, activate);
+    }
+
+    void spawnGroup(int group, bool ordered, double delay, gd::vector<int> const& remapKeys,
+        int triggerID, int controlID) {
+        if (s_simulating) {
+            if (ordered || delay > 0.0 || !remapKeys.empty()) {
+                s_unsupportedInteraction = true;
+                return;
+            }
+            setSimulatedGroupState(this, group, true);
+            return;
+        }
+        GJBaseGameLayer::spawnGroup(group, ordered, delay, remapKeys, triggerID, controlID);
+    }
+
+    void gameEventTriggered(GJGameEvent event, int material, int playerID) {
+        if (s_simulating) return;
+        GJBaseGameLayer::gameEventTriggered(event, material, playerID);
+    }
+
+    void pickupItem(GameObject* object) {
+        if (s_simulating) return;
+        GJBaseGameLayer::pickupItem(object);
+    }
+
+    void updateCounters(int itemID, int value) {
+        if (s_simulating) return;
+        GJBaseGameLayer::updateCounters(itemID, value);
     }
 };
 
