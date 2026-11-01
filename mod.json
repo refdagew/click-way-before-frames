@@ -1,0 +1,9 @@
+{
+  "geode": "5.11.2",
+  "gd": { "win": "2.2081" },
+  "id": "refdagew.click-way-before-frames",
+  "name": "Click-Way-Before-Frames",
+  "version": "v0.1.0",
+  "developer": "refdagew",
+  "description": "An independently written early-input buffering experiment for Geometry Dash. One shared tick limit, one pause-menu control."
+}
