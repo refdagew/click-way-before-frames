@@ -262,10 +262,15 @@ namespace {
 
         const auto started = std::chrono::steady_clock::now();
         const auto deadline = started + SEARCH_BUDGET;
-        const uint32_t maxWork = std::min<uint32_t>(
+        // Reserve enough work for a complete ascending scan at modest
+        // settings: each candidate runs its delay prefix plus one full horizon.
+        // Large user-selected horizons remain bounded to avoid freezing GD.
+        const uint64_t requestedWork =
+            static_cast<uint64_t>(limit) * (3ull * static_cast<uint64_t>(limit) + 3ull) / 2ull;
+        const uint32_t maxWork = static_cast<uint32_t>(std::min<uint64_t>(
             MAX_SIMULATION_STEPS,
-            static_cast<uint32_t>(std::max(4096, limit * 8))
-        );
+            std::max<uint64_t>(4096ull, requestedWork)
+        ));
         uint32_t work = 0;
 
         // First check the input exactly as requested. The horizon is the same
