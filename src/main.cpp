@@ -909,13 +909,13 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             state.trackedHeld = true;
         }
         else if (!down && state.trackedHeld && state.pressStartTick >= 0) {
-            const int duration = std::clamp(static_cast<int>(state.tick) - state.pressStartTick, 1, 240);
+            const int duration = std::clamp(static_cast<int>(state.tick) - state.pressStartTick, 1, MAX_LIMIT_TICKS);
             int* estimate = &state.tapHoldTicks;
             if (state.pressWasRobot) estimate = &state.robotHoldTicks;
             else if (state.pressWasShip) estimate = &state.shipHoldTicks;
             else if (state.pressWasWave) estimate = &state.waveHoldTicks;
             else if (state.pressWasSwing) estimate = &state.swingHoldTicks;
-            *estimate = std::clamp((*estimate * 3 + duration) / 4, 1, 240);
+            *estimate = std::clamp((*estimate * 3 + duration) / 4, 1, MAX_LIMIT_TICKS);
             state.pressStartTick = -1;
             state.trackedHeld = false;
         }
