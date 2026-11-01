@@ -31,7 +31,7 @@ namespace {
         uint64_t dueTick = 0;
         bool down = false;
         int button = 1;
-        bool player2 = false;
+        bool isPlayer1 = true;
     };
 
     struct PlayerBuffer {
@@ -284,12 +284,12 @@ namespace {
         return 0;
     }
 
-    void enqueueInput(PlayerBuffer& state, bool down, int button, bool player2, int newShift = 0) {
+    void enqueueInput(PlayerBuffer& state, bool down, int button, bool isPlayer1, int newShift = 0) {
         if (newShift > 0) {
             state.activeShift = std::max(state.activeShift, newShift);
         }
         const auto due = state.tick + static_cast<uint64_t>(state.activeShift);
-        state.inputs.push_back({ due, down, button, player2 });
+        state.inputs.push_back({ due, down, button, isPlayer1 });
     }
 
     void deliverInputs(PlayLayer* layer, int index) {
@@ -299,7 +299,7 @@ namespace {
             state.inputs.pop_front();
 
             s_injecting = true;
-            layer->handleButton(input.down, input.button, input.player2);
+            layer->handleButton(input.down, input.button, input.isPlayer1);
             s_injecting = false;
 
             // The delayed hold is complete only when its matching release reaches
@@ -454,13 +454,13 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         // Once an early input is queued, keep the same offset for its matching
         // release and any inputs made while that hold is pending.
         if (state.activeShift > 0) {
-            enqueueInput(state, down, button, !isPlayer1);
+            enqueueInput(state, down, button, isPlayer1);
             return;
         }
 
         const int delay = findSafeDelay(layer, real, index, down, button);
         if (delay > 0) {
-            enqueueInput(state, down, button, !isPlayer1, delay);
+            enqueueInput(state, down, button, isPlayer1, delay);
             return;
         }
 
