@@ -291,9 +291,22 @@ namespace {
         // prediction starts with a clean collision-contact set.
         ghost->resetTouchedRings(true);
         ghost->setPosition(real->getPosition());
+        ghost->m_position = real->m_position;
         ghost->setRotation(real->getRotation());
         ghost->setScale(real->getScale());
         ghost->setContentSize(real->getContentSize());
+        ghost->m_width = real->m_width;
+        ghost->m_height = real->m_height;
+
+        // Preserve mode-independent state that changes the result of the next
+        // collision and movement step as well as the per-mode physics flags.
+        ghost->m_gravityMod = real->m_gravityMod;
+        ghost->m_isOnGround = real->m_isOnGround;
+        ghost->m_isUpsideDown = real->m_isUpsideDown;
+        ghost->m_vehicleSize = real->m_vehicleSize;
+        ghost->m_playerSpeed = real->m_playerSpeed;
+        ghost->m_isDashing = real->m_isDashing;
+        ghost->m_lastActivatedPortal = real->m_lastActivatedPortal;
 
         // Preserve the mode-specific physics state that is not contained in the
         // generic attribute copy: vehicle flags, directional state, velocity,
@@ -322,6 +335,10 @@ namespace {
         ghost->m_speedMultiplier = real->m_speedMultiplier;
         ghost->m_gravity = real->m_gravity;
         ghost->m_yStart = real->m_yStart;
+        ghost->m_fixGravityBug = real->m_fixGravityBug;
+        ghost->m_fixRobotJump = real->m_fixRobotJump;
+        ghost->m_enable22Changes = real->m_enable22Changes;
+        ghost->m_enableImpulseFix = real->m_enableImpulseFix;
         ghost->m_totalTime = real->m_totalTime;
         ghost->m_lastPosition = real->m_lastPosition;
 
@@ -344,6 +361,17 @@ namespace {
         ghost->m_lastFlipTime = real->m_lastFlipTime;
         ghost->m_lastSpiderFlipTime = real->m_lastSpiderFlipTime;
         ghost->m_lastGroundedPos = real->m_lastGroundedPos;
+        ghost->m_blackOrbRelated = real->m_blackOrbRelated;
+        ghost->m_padRingRelated = real->m_padRingRelated;
+        ghost->m_ringJumpRelated = real->m_ringJumpRelated;
+        ghost->m_wasJumpBuffered = real->m_wasJumpBuffered;
+        ghost->m_stateJumpBuffered = real->m_stateJumpBuffered;
+        ghost->m_stateRingJump = real->m_stateRingJump;
+        ghost->m_stateRingJump2 = real->m_stateRingJump2;
+        ghost->m_wasRobotJump = real->m_wasRobotJump;
+        ghost->m_touchedRing = real->m_touchedRing;
+        ghost->m_touchedPad = real->m_touchedPad;
+        ghost->m_touchedGravityPortal = real->m_touchedGravityPortal;
 
         ghost->m_isOnSlope = real->m_isOnSlope;
         ghost->m_wasOnSlope = real->m_wasOnSlope;
@@ -398,6 +426,7 @@ namespace {
         ghost->m_stateNoAutoJump = real->m_stateNoAutoJump;
         ghost->m_stateScale = real->m_stateScale;
         ghost->m_maybeStateForce2 = real->m_maybeStateForce2;
+        ghost->m_stateDartSlide = real->m_stateDartSlide;
 
         // copyAttributes carries the movement state; these fields explicitly restore
         // the held-button state, which determines ship/wave/swing movement and releases.
