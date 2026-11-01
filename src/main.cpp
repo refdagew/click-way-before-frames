@@ -140,8 +140,10 @@ namespace {
 
     void seedGhost(PlayerObject* ghost, PlayerObject* real) {
         ghost->setVisible(false);
-        ghost->resetTouchedRings(true);
         ghost->copyAttributes(real);
+        // Do not inherit ring-contact history from the live player: each
+        // prediction starts with a clean collision-contact set.
+        ghost->resetTouchedRings(true);
         ghost->setPosition(real->getPosition());
         ghost->setRotation(real->getRotation());
         ghost->setScale(real->getScale());
