@@ -3,7 +3,7 @@
 #include <Geode/modify/PauseLayer.hpp>
 #include <Geode/modify/PlayerObject.hpp>
 #include <Geode/modify/PlayLayer.hpp>
-#include <Geode/modify/GameObject.hpp>
+#include <Geode/modify/EffectGameObject.hpp>
 #include <Geode/ui/Popup.hpp>
 #include <Geode/ui/SliderNode.hpp>
 
