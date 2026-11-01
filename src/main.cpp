@@ -927,12 +927,20 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         GJBaseGameLayer::spawnGroup(group, ordered, delay, remapKeys, triggerID, controlID);
     }
 
-    void triggerMoveCommand(EffectGameObject* object) {
+    void moveObject(GameObject* object, double dx, double dy, bool lockPlayerY) {
         if (s_simulating) {
             s_unsupportedInteraction = true;
             return;
         }
-        GJBaseGameLayer::triggerMoveCommand(object);
+        GJBaseGameLayer::moveObject(object, dx, dy, lockPlayerY);
+    }
+
+    void moveAreaObject(GameObject* object, float dx, float dy) {
+        if (s_simulating) {
+            s_unsupportedInteraction = true;
+            return;
+        }
+        GJBaseGameLayer::moveAreaObject(object, dx, dy);
     }
 
     void triggerRotateCommand(EnhancedTriggerObject* object) {
