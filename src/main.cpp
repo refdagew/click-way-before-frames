@@ -86,6 +86,17 @@ namespace {
     std::unordered_set<GameObject*> s_simEnabledObjects;
     std::unordered_set<GameObject*> s_collisionSeen;
 
+    struct MovingObjectSnapshot {
+        GameObject* object = nullptr;
+        CCPoint position = CCPointZero;
+        CCPoint lastPosition = CCPointZero;
+        CCPoint velocity = CCPointZero;
+        double positionX = 0.0;
+        double positionY = 0.0;
+    };
+    std::vector<MovingObjectSnapshot> s_movingObjects;
+    std::unordered_set<GameObject*> s_recordedMovingObjects;
+
     struct GroupToggleRollback {
         int group = 0;
         bool active = false;
@@ -116,6 +127,19 @@ namespace {
     }
 
     void restorePredictionWorld() {
+        for (auto it = s_movingObjects.rbegin(); it != s_movingObjects.rend(); ++it) {
+            auto& state = *it;
+            if (!state.object) continue;
+            state.object->m_positionX = state.positionX;
+            state.object->m_positionY = state.positionY;
+            state.object->setPosition(state.position);
+            state.object->setLastPosition(state.lastPosition);
+            state.object->setObjectRectDirty(true);
+            state.object->setOrientedRectDirty(true);
+        }
+        s_movingObjects.clear();
+        s_recordedMovingObjects.clear();
+
         for (auto it = s_objectRollback.rbegin(); it != s_objectRollback.rend(); ++it) {
             auto& state = *it;
             if (!state.object) continue;
@@ -141,6 +165,64 @@ namespace {
         s_simDisabledObjects.clear();
         s_simEnabledObjects.clear();
         s_collisionSeen.clear();
+    }
+
+    void advanceMovingObject(GameObject* object) {
+        if (!s_simulating || !object || !s_recordedMovingObjects.insert(object).second) {
+            if (!s_simulating || !object) return;
+            auto it = std::find_if(s_movingObjects.begin(), s_movingObjects.end(),
+                [object](MovingObjectSnapshot const& state) { return state.object == object; });
+            if (it == s_movingObjects.end()) return;
+
+            const float step = static_cast<float>(s_simTick);
+            const CCPoint offset = {
+                it->velocity.x * step,
+                it->velocity.y * step
+            };
+            object->m_positionX = it->positionX + offset.x;
+            object->m_positionY = it->positionY + offset.y;
+            object->setPosition({ it->position.x + offset.x, it->position.y + offset.y });
+            object->setLastPosition({
+                it->lastPosition.x + offset.x,
+                it->lastPosition.y + offset.y
+            });
+            object->setObjectRectDirty(true);
+            object->setOrientedRectDirty(true);
+            return;
+        }
+
+        // Group-parented objects follow pivots and easing curves; a straight-line
+        // extrapolation would be misleading, so stop this prediction branch.
+        if (object->m_hasGroupParent) {
+            s_unsupportedInteraction = true;
+            return;
+        }
+
+        const auto current = object->getRealPosition();
+        const auto previous = object->getLastPosition();
+        const CCPoint velocity = { current.x - previous.x, current.y - previous.y };
+        if (std::abs(velocity.x) + std::abs(velocity.y) < 0.01f) {
+            s_recordedMovingObjects.erase(object);
+            return;
+        }
+
+        s_movingObjects.push_back({
+            object,
+            object->getPosition(),
+            previous,
+            velocity,
+            object->m_positionX,
+            object->m_positionY
+        });
+
+        const float step = static_cast<float>(s_simTick);
+        const CCPoint offset = { velocity.x * step, velocity.y * step };
+        object->m_positionX += offset.x;
+        object->m_positionY += offset.y;
+        object->setPosition({ object->getPosition().x + offset.x, object->getPosition().y + offset.y });
+        object->setLastPosition({ previous.x + offset.x, previous.y + offset.y });
+        object->setObjectRectDirty(true);
+        object->setOrientedRectDirty(true);
     }
 
     void setSimulatedGroupState(GJBaseGameLayer* layer, int group, bool active) {
@@ -867,6 +949,8 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
         for (int i = 0; i < objectCount; ++i) {
             auto* object = (*objects)[i];
             if (!object || s_simDisabledObjects.contains(object)) continue;
+            advanceMovingObject(object);
+            if (s_unsupportedInteraction) break;
             s_collisionSeen.insert(object);
 
             auto type = object->m_objectType;
