@@ -227,11 +227,14 @@ namespace {
         // If the queued press already reached GD, make sure it is released before
         // clearing the pending release. This avoids a held button leaking into retry.
         if (layer && player) {
-            auto held = player->m_holdingButtons.find(static_cast<int>(PlayerButton::Jump));
-            if (held != player->m_holdingButtons.end() && held->second) {
-                s_injecting = true;
-                layer->handleButton(false, 1, index == 0);
-                s_injecting = false;
+            for (int button = static_cast<int>(PlayerButton::Jump);
+                button <= static_cast<int>(PlayerButton::Right); ++button) {
+                auto held = player->m_holdingButtons.find(button);
+                if (held != player->m_holdingButtons.end() && held->second) {
+                    s_injecting = true;
+                    layer->handleButton(false, button, index == 0);
+                    s_injecting = false;
+                }
             }
         }
 
