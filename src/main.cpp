@@ -706,7 +706,11 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             if (!object) continue;
 
             auto type = object->m_objectType;
-            const bool specialPortal =
+            const int objectID = object->m_objectID;
+            const bool speedPortal =
+                objectID == 200 || objectID == 201 || objectID == 202 ||
+                objectID == 203 || objectID == 1334;
+            const bool specialPortal = speedPortal ||
                 type == GameObjectType::RegularSizePortal ||
                 type == GameObjectType::MiniSizePortal ||
                 type == GameObjectType::TeleportPortal;
@@ -719,6 +723,17 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             // These portals are applied to the ghost itself and removed from the
             // normal collision pass so GD cannot apply the same portal a second time.
             if (!s_simTouchedObjects.insert(object).second) continue;
+
+            if (speedPortal) {
+                switch (objectID) {
+                    case 200: player->m_playerSpeed = 0.7f; break;
+                    case 201: player->m_playerSpeed = 0.9f; break;
+                    case 202: player->m_playerSpeed = 1.1f; break;
+                    case 203: player->m_playerSpeed = 1.3f; break;
+                    case 1334: player->m_playerSpeed = 1.6f; break;
+                }
+                continue;
+            }
 
             if (type == GameObjectType::RegularSizePortal || type == GameObjectType::MiniSizePortal) {
                 const bool mini = type == GameObjectType::MiniSizePortal;
@@ -733,6 +748,13 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
                 continue; // orange endpoint is only a destination
             }
             if (object->m_objectID != 747) {
+                s_unsupportedInteraction = true;
+                continue;
+            }
+            if (portal->m_staticForceEnabled || portal->m_redirectForceEnabled ||
+                portal->m_redirectDash || portal->m_gravityMode != 0 || portal->m_teleportEase) {
+                // Force redirects, gravity changes and eased teleports depend on more
+                // than a simple paired-portal offset; do not score those runs as safe.
                 s_unsupportedInteraction = true;
                 continue;
             }
@@ -849,6 +871,38 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             return;
         }
         GJBaseGameLayer::spawnGroup(group, ordered, delay, remapKeys, triggerID, controlID);
+    }
+
+    void triggerMoveCommand(EffectGameObject* object) {
+        if (s_simulating) {
+            s_unsupportedInteraction = true;
+            return;
+        }
+        GJBaseGameLayer::triggerMoveCommand(object);
+    }
+
+    void triggerRotateCommand(EnhancedTriggerObject* object) {
+        if (s_simulating) {
+            s_unsupportedInteraction = true;
+            return;
+        }
+        GJBaseGameLayer::triggerRotateCommand(object);
+    }
+
+    void triggerDynamicMoveCommand(EffectGameObject* object) {
+        if (s_simulating) {
+            s_unsupportedInteraction = true;
+            return;
+        }
+        GJBaseGameLayer::triggerDynamicMoveCommand(object);
+    }
+
+    void triggerDynamicRotateCommand(EffectGameObject* object) {
+        if (s_simulating) {
+            s_unsupportedInteraction = true;
+            return;
+        }
+        GJBaseGameLayer::triggerDynamicRotateCommand(object);
     }
 
     void gameEventTriggered(GJGameEvent event, int material, int playerID) {
