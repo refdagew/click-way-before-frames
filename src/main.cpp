@@ -17,7 +17,7 @@
 using namespace geode::prelude;
 
 namespace {
-    constexpr int DEFAULT_LIMIT_TICKS = 16384;
+    constexpr int DEFAULT_LIMIT_TICKS = 130;
     constexpr int MAX_LIMIT_TICKS = 16384;
     constexpr float TICK_SECONDS = 1.f / 240.f;
     constexpr char const* SAVED_LIMIT_KEY = "shared-early-click-limit";
