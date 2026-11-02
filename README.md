@@ -2,27 +2,30 @@
 
 An independently written Geometry Dash Geode mod for Windows.
 
-Open the button from the **pause menu** to adjust one setting: **Maximum early-click delay**, in physics ticks. The slider accepts any whole-tick value from **0 to 16,384**; it is not locked to a preset duration. The same value controls both the delay search and the forward-simulation horizon. It is shared across all player modes; there are no per-mode sliders.
+Open the button from the **pause menu** to adjust one setting: **Maximum early-click delay**, in physics ticks. The slider accepts every whole-tick value from **0 to 16,384**. The selected number is used both as the maximum delay to test and as the future prediction horizon. It is shared across all player modes; there are no per-mode sliders.
 
 - Configurable range: **0–16,384 ticks**, one-tick increments
 - 4 physics ticks correspond to one 60-FPS frame
 - Target: Geometry Dash **2.2081**, Windows / Geode **5.11.2**
+- Initial value: **130 ticks**; this is only the first-install default, not a cap
 
-## Current engine
+## Prediction horizon
 
-The mod creates an off-screen player clone from the live player state, tests the current input against the future physics/collision path, and searches later input timings when the immediate timing is predicted to die. When it finds a surviving timing, it queues the press/release with a shared offset so the hold length is preserved.
+A living candidate is advanced for the **entire selected horizon**. There is no wall-clock deadline, simulation-work ceiling, landing shortcut, or repeated-collision shortcut. A candidate that dies before its delayed input is delivered is rejected because it has no living trajectory after that point.
 
-The prediction path uses the same player physics for the classic modes (cube, ship, ball, UFO, wave, robot, spider and swing). Platformer jump and left/right inputs are also mapped into that player simulation and use the same slider. The dual-player queue is maintained separately for each player.
+This means large values can take a long time to evaluate. At 16,384 ticks, a click that requires testing many possible offsets can stall the game for a substantial period. The mod does not silently shorten the selected horizon to protect frame rate.
 
-The search is deliberately bounded to an **8 ms per-input budget** and a maximum simulation-work limit. When the search runs out of budget, encounters an unsupported interaction, or cannot create a clone, it sends the input through normally instead of stalling the game or delaying it on an unverified result.
+The ghost uses the game's player update and collision routines. The same physics path is used for cube, ship, ball, UFO, wave, robot, spider and swing, with the same shared setting. Platformer jump and left/right controls are also mapped into the player simulation. Each player in dual mode has a separate input queue.
 
-## Known boundaries
+## Interactions and unverified paths
 
-- The clone still shares the live level's object collection. To avoid speculative inputs activating shared level state, prediction stops at level-effect interactions such as orbs, pads, portals, and triggers; inputs at those points pass through normally.
-- Long horizons have substantial simulation cost. The configured number is honored as the search cap and horizon, but a search that cannot finish inside the safety budget passes through normally.
-- The Windows package compiles successfully. It has not been run inside a live Geometry Dash session, so in-game behavior still needs validation.
+The prediction engine snapshots and restores shared object activation state, effect state, group toggles, and selected moving-object state. It simulates collectible/pad interactions, gravity changes, supported vehicle portals, speed and size portals, simple teleport portals, and group toggles without committing speculative state to the real run.
 
-## Build
+Some level mechanics are not fully modeled yet, including spawn/move/rotate trigger chains, dual/solo portals, group-parented motion, and complex force/eased teleports. When one of these is encountered, the ghost still runs out the configured tick horizon where it remains alive, but the trial is marked **unverified** and is not used as a safe timing.
 
-GitHub Actions builds the Windows package. See the latest build workflow:
+## Build and source
+
+The source is independently written; the inspiration project is used only as a behavioural reference.
+
+GitHub Actions builds the Windows package:
 https://github.com/refdagew/click-way-before-frames/actions/workflows/build.yml
