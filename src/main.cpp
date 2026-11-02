@@ -830,9 +830,15 @@ namespace {
             // Do not lose clicks received while the search was suspended: replay
             // their edges in order, starting now, one physics tick apart.
             state.activeShift = 0;
-            uint64_t due = state.tick;
+            uint64_t lastDue = state.tick == 0 ? 0 : state.tick - 1;
             for (auto const& edge : pending.edges) {
-                state.inputs.push_back({ due++, edge.down, edge.button, edge.isPlayer1 });
+                const uint64_t offset = edge.capturedTick >= pending.startTick
+                    ? edge.capturedTick - pending.startTick
+                    : 0;
+                uint64_t due = state.tick + offset;
+                due = std::max(due, lastDue + 1);
+                state.inputs.push_back({ due, edge.down, edge.button, edge.isPlayer1 });
+                lastDue = due;
             }
         }
     }
@@ -885,7 +891,10 @@ namespace {
         if (newShift > 0) {
             state.activeShift = std::max(state.activeShift, newShift);
         }
-        const auto due = state.tick + static_cast<uint64_t>(state.activeShift);
+        auto due = state.tick + static_cast<uint64_t>(state.activeShift);
+        if (!state.inputs.empty()) {
+            due = std::max(due, state.inputs.back().dueTick + 1);
+        }
         state.inputs.push_back({ due, down, button, isPlayer1 });
     }
 
@@ -1095,7 +1104,7 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
 
         // Once an early input is queued, keep the same offset for its matching
         // release and any inputs made while that hold is pending.
-        if (state.activeShift > 0) {
+        if (state.activeShift > 0 || !state.inputs.empty()) {
             enqueueInput(state, down, button, isPlayer1);
             return;
         }
