@@ -489,6 +489,8 @@ namespace {
         ghost->m_enable22Changes = real->m_enable22Changes;
         ghost->m_enableImpulseFix = real->m_enableImpulseFix;
         ghost->m_totalTime = real->m_totalTime;
+        ghost->m_gameModeChangedTime = real->m_gameModeChangedTime;
+        ghost->m_hasEverJumped = real->m_hasEverJumped;
         ghost->m_lastPosition = real->m_lastPosition;
 
         ghost->m_yVelocity = real->m_yVelocity;
@@ -742,6 +744,13 @@ namespace {
                 log::warn("CWBF: P{} {} hit unsupported mechanics in the baseline; sending input without buffering.",
                     index + 1, search.down ? "press" : "release");
                 return { false, 0 };
+            }
+
+            const auto baselineSpent = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - sliceStart
+            ).count();
+            if (baselineSpent >= SEARCH_SLICE_BUDGET_MS) {
+                return { true, 0 };
             }
         }
 
