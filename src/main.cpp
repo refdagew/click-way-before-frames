@@ -27,11 +27,8 @@ namespace {
     constexpr float TICK_SECONDS = 1.f / 240.f;
     constexpr char const* SAVED_LIMIT_KEY = "shared-early-click-limit";
 
-    // Larger user-selected horizons receive more computation time, while a hard
-    // ceiling protects the game from a pathological level or endless trigger chain.
-    constexpr int MIN_SEARCH_BUDGET_MS = 12;
-    constexpr int MAX_SEARCH_BUDGET_MS = 100;
-    constexpr uint32_t MAX_SIMULATION_STEPS = 1000000;
+    // The configured value is a hard per-trial physics horizon. There is
+    // intentionally no wall-clock or simulation-step cutoff.
 
     struct QueuedInput {
         uint64_t dueTick = 0;
@@ -533,12 +530,9 @@ namespace {
         ghost->setOpacity(0);
     }
 
-    bool ghostStep(PlayLayer* layer, PlayerObject* ghost, uint32_t& work,
-        uint32_t maxWork, std::chrono::steady_clock::time_point deadline) {
-        if (++work > maxWork || std::chrono::steady_clock::now() >= deadline) {
-            return false;
-        }
-
+    bool ghostStep(PlayLayer* layer, PlayerObject* ghost) {
+        // One call is one complete Geometry Dash physics tick. Unsupported
+        // interactions are recorded separately and do not truncate the horizon.
         ++s_simTick;
         ghost->update(s_tickDuration);
         ghost->updateRotation(s_tickDuration);
@@ -548,7 +542,7 @@ namespace {
         if ((s_simDied || ghost->m_isDead) && s_simDeathTick < 0) {
             s_simDeathTick = s_simTick;
         }
-        return !s_simDied && !ghost->m_isDead && !s_unsupportedInteraction;
+        return !s_simDied && !ghost->m_isDead;
     }
 
     int normalizedButton(int button) {
@@ -581,7 +575,6 @@ namespace {
     enum class TestResult {
         Survives,
         Dies,
-        BudgetExceeded,
         Unsupported
     };
 
@@ -594,10 +587,7 @@ namespace {
         int delay,
         int horizon,
         int releaseAfter,
-        int& deathTick,
-        uint32_t& work,
-        uint32_t maxWork,
-        std::chrono::steady_clock::time_point deadline
+        int& deathTick
     ) {
         restorePredictionWorld();
         s_objectRollback.clear();
@@ -613,12 +603,13 @@ namespace {
         s_unsupportedInteraction = false;
         s_simulating = true;
 
+        // Advance the player with the original button state until the candidate
+        // input's scheduled tick. If the player dies before then, this candidate
+        // cannot possibly be saved by a later input.
         for (int tick = 0; tick < delay; ++tick) {
-            if (!ghostStep(layer, ghost, work, maxWork, deadline)) {
+            if (!ghostStep(layer, ghost)) {
                 s_simulating = false;
                 restorePredictionWorld();
-                if (s_unsupportedInteraction) return TestResult::Unsupported;
-                if (std::chrono::steady_clock::now() >= deadline || work > maxWork) return TestResult::BudgetExceeded;
                 deathTick = s_simDeathTick;
                 return TestResult::Dies;
             }
@@ -628,40 +619,25 @@ namespace {
         if (down) ghost->pushButton(playerButton);
         else ghost->releaseButton(playerButton);
 
-        int airborneTicks = 0;
-        int groundedTicks = 0;
-        const bool landingBased = !ghost->m_isShip && !ghost->m_isDart && !ghost->m_isSwing;
-        const int landingConfirm = ghost->m_isSpider ? 12 : (ghost->m_isBall || ghost->m_isBird || ghost->m_isRobot ? 8 : 3);
-
+        // A trial is never declared safe because of a landing or a short
+        // "looks clear" interval. A living clone receives all horizon steps.
         for (int tick = 0; tick < horizon; ++tick) {
             if (down && releaseAfter >= 0 && tick == releaseAfter) {
-                ghost->releaseButton(asPlayerButton(button));
+                ghost->releaseButton(playerButton);
             }
-            if (!ghostStep(layer, ghost, work, maxWork, deadline)) {
+            if (!ghostStep(layer, ghost)) {
                 s_simulating = false;
                 restorePredictionWorld();
-                if (s_unsupportedInteraction) return TestResult::Unsupported;
-                if (std::chrono::steady_clock::now() >= deadline || work > maxWork) return TestResult::BudgetExceeded;
                 deathTick = s_simDeathTick;
                 return TestResult::Dies;
-            }
-            if (!ghost->m_isOnGround) {
-                ++airborneTicks;
-                groundedTicks = 0;
-            }
-            else if (airborneTicks >= (ghost->m_isBall ? 2 : 6)) {
-                ++groundedTicks;
-                if (landingBased && (releaseAfter < 0 || tick >= releaseAfter) && groundedTicks >= landingConfirm) {
-                    s_simulating = false;
-                    restorePredictionWorld();
-                    return TestResult::Survives;
-                }
             }
         }
 
         s_simulating = false;
         restorePredictionWorld();
-        return TestResult::Survives;
+        ghost->stopAllActions();
+        ghost->stopParticles();
+        return s_unsupportedInteraction ? TestResult::Unsupported : TestResult::Survives;
     }
 
     // Returns a positive tick count only when the cloned player survives after
@@ -675,52 +651,21 @@ namespace {
         auto* ghost = createGhost(layer, index);
         if (!ghost) return 0;
 
-        const auto started = std::chrono::steady_clock::now();
-        const int budgetMs = MIN_SEARCH_BUDGET_MS +
-            (limit * (MAX_SEARCH_BUDGET_MS - MIN_SEARCH_BUDGET_MS)) / MAX_LIMIT_TICKS;
-        const auto deadline = started + std::chrono::milliseconds(budgetMs);
-        // Reserve enough work for a complete ascending scan at modest
-        // settings: each candidate runs its delay prefix plus one full horizon.
-        // Large user-selected horizons remain bounded to avoid freezing GD.
-        const uint64_t requestedWork =
-            static_cast<uint64_t>(limit) * (3ull * static_cast<uint64_t>(limit) + 3ull) / 2ull;
-        const uint32_t maxWork = static_cast<uint32_t>(std::min<uint64_t>(
-            MAX_SIMULATION_STEPS,
-            std::max<uint64_t>(4096ull, requestedWork)
-        ));
-        uint32_t work = 0;
-
-        // First check the input exactly as requested. The horizon is the same
-        // shared value as the delay limit, regardless of the current game mode.
+        // There is no time budget, simulation-step cap, landing shortcut, or
+        // repeated-death early-stop heuristic. Every candidate that remains
+        // alive is simulated through the full selected future horizon.
         int immediateDeathTick = -1;
-        auto immediate = testDelay(layer, real, ghost, down, button, 0, limit, releaseAfter,
-            immediateDeathTick, work, maxWork, deadline);
+        auto immediate = testDelay(layer, real, ghost, down, button, 0, limit,
+            releaseAfter, immediateDeathTick);
         if (immediate == TestResult::Survives) return 0;
-        if (immediate == TestResult::BudgetExceeded || immediate == TestResult::Unsupported) return 0;
+        if (immediate == TestResult::Unsupported) return 0;
 
-        // Search from the smallest correction upward, keeping the first working
-        // offset. Each candidate starts from a fresh copy of the real player's state.
-        int lastDeathTick = immediateDeathTick;
-        int repeatedDeathTick = 0;
         for (int delay = 1; delay <= limit; ++delay) {
             int candidateDeathTick = -1;
-            auto result = testDelay(layer, real, ghost, down, button, delay, limit, releaseAfter,
-                candidateDeathTick, work, maxWork, deadline);
+            auto result = testDelay(layer, real, ghost, down, button, delay, limit,
+                releaseAfter, candidateDeathTick);
             if (result == TestResult::Survives) return delay;
-            if (result == TestResult::BudgetExceeded || result == TestResult::Unsupported) break;
-
-            // Four consecutive delay trials that reach the same absolute collision
-            // tick have moved the click past the hazard being corrected. The crash
-            // is now caused by the next obstacle, so testing still-later timings is
-            // redundant for this search pass.
-            if (candidateDeathTick >= 0 && candidateDeathTick == lastDeathTick) {
-                ++repeatedDeathTick;
-            }
-            else {
-                lastDeathTick = candidateDeathTick;
-                repeatedDeathTick = candidateDeathTick >= 0 ? 1 : 0;
-            }
-            if (repeatedDeathTick >= 4) break;
+            if (result == TestResult::Unsupported) return 0;
         }
         return 0;
     }
