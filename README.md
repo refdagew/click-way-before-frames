@@ -9,11 +9,13 @@ Open the button from the **pause menu** to adjust one setting: **Maximum early-c
 - Target: Geometry Dash **2.2081**, Windows / Geode **5.11.2**
 - Initial value: **130 ticks**; this is only the first-install default, not a cap
 
-## Prediction horizon
+## Prediction horizon and no-hitch search
 
-A living candidate is advanced for the **entire selected horizon**. There is no wall-clock deadline, simulation-work ceiling, landing shortcut, or repeated-collision shortcut. A candidate that dies before its delayed input is delivered is rejected because it has no living trajectory after that point.
+A living candidate is advanced for the **entire selected horizon**. The search does not shorten a candidate's horizon, use a landing shortcut, or stop after repeated collision timings. A candidate that dies before its delayed input is delivered is rejected because it has no living trajectory after that point.
 
-This means large values can take a long time to evaluate. At 16,384 ticks, a click that requires testing many possible offsets can stall the game for a substantial period. The mod does not silently shorten the selected horizon to protect frame rate.
+The delay search is time-sliced: it aims to spend about **4 ms per player update**, remembers the next offset, and resumes on a later update instead of completing the whole delay scan inside the original click callback. The original input and any subsequent press/release edges are held until the search resolves. The time slice is not a total-work cap; the scan keeps going until it finds a surviving offset, reaches the configured maximum, or encounters an unverified mechanic.
+
+There is one important limit to that smoothing: a single candidate is still simulated as one complete run. At very large horizons (especially 16,384 ticks), that one run can itself exceed the time slice. The setting still means the full requested horizon; it is not silently reduced.
 
 The ghost uses the game's player update and collision routines. The same physics path is used for cube, ship, ball, UFO, wave, robot, spider and swing, with the same shared setting. Platformer jump and left/right controls are also mapped into the player simulation. Each player in dual mode has a separate input queue.
 
