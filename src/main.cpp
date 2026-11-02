@@ -96,7 +96,7 @@ namespace {
         double positionY = 0.0;
     };
     std::vector<MovingObjectSnapshot> s_movingObjects;
-    std::unordered_set<GameObject*> s_recordedMovingObjects;
+    std::unordered_map<GameObject*, size_t> s_movingObjectIndices;
 
     struct GroupToggleRollback {
         int group = 0;
@@ -139,7 +139,7 @@ namespace {
             state.object->setOrientedRectDirty(true);
         }
         s_movingObjects.clear();
-        s_recordedMovingObjects.clear();
+        s_movingObjectIndices.clear();
 
         for (auto it = s_objectRollback.rbegin(); it != s_objectRollback.rend(); ++it) {
             auto& state = *it;
@@ -174,27 +174,38 @@ namespace {
     }
 
     void advanceMovingObject(GameObject* object) {
-        if (!s_simulating || !object || !s_recordedMovingObjects.insert(object).second) {
-            if (!s_simulating || !object) return;
-            auto it = std::find_if(s_movingObjects.begin(), s_movingObjects.end(),
-                [object](MovingObjectSnapshot const& state) { return state.object == object; });
-            if (it == s_movingObjects.end()) return;
+        if (!s_simulating || !object) return;
 
+        // Once a moving object has been snapshotted, reuse its original position
+        // in O(1) rather than linearly searching the snapshot vector on every tick.
+        auto existing = s_movingObjectIndices.find(object);
+        if (existing != s_movingObjectIndices.end()) {
+            auto const& state = s_movingObjects[existing->second];
             const float step = static_cast<float>(s_simTick);
             const CCPoint offset = {
-                it->velocity.x * step,
-                it->velocity.y * step
+                state.velocity.x * step,
+                state.velocity.y * step
             };
-            object->m_positionX = it->positionX + offset.x;
-            object->m_positionY = it->positionY + offset.y;
-            object->setPosition({ it->position.x + offset.x, it->position.y + offset.y });
+            object->m_positionX = state.positionX + offset.x;
+            object->m_positionY = state.positionY + offset.y;
+            object->setPosition({ state.position.x + offset.x, state.position.y + offset.y });
             const float previousStep = std::max(0.f, step - 1.f);
             object->setLastPosition({
-                it->lastPosition.x + it->velocity.x * previousStep,
-                it->lastPosition.y + it->velocity.y * previousStep
+                state.lastPosition.x + state.velocity.x * previousStep,
+                state.lastPosition.y + state.velocity.y * previousStep
             });
             object->setObjectRectDirty(true);
             object->setOrientedRectDirty(true);
+            return;
+        }
+
+        const auto current = object->getRealPosition();
+        const auto previous = object->getLastPosition();
+        const CCPoint velocity = { current.x - previous.x, current.y - previous.y };
+        if (std::abs(velocity.x) + std::abs(velocity.y) < 0.01f) {
+            // Stationary group-parented geometry is safe to treat as static.
+            // We only reject the branch once an unsupported parented object is
+            // actually moving in the sampled game state.
             return;
         }
 
@@ -205,14 +216,7 @@ namespace {
             return;
         }
 
-        const auto current = object->getRealPosition();
-        const auto previous = object->getLastPosition();
-        const CCPoint velocity = { current.x - previous.x, current.y - previous.y };
-        if (std::abs(velocity.x) + std::abs(velocity.y) < 0.01f) {
-            s_recordedMovingObjects.erase(object);
-            return;
-        }
-
+        const size_t index = s_movingObjects.size();
         s_movingObjects.push_back({
             object,
             object->getPosition(),
@@ -221,6 +225,7 @@ namespace {
             object->m_positionX,
             object->m_positionY
         });
+        s_movingObjectIndices.emplace(object, index);
 
         const float step = static_cast<float>(s_simTick);
         const CCPoint offset = { velocity.x * step, velocity.y * step };
@@ -403,14 +408,34 @@ namespace {
         // Preserve the mode-specific physics state that is not contained in the
         // generic attribute copy: vehicle flags, directional state, velocity,
         // gravity, slope contact, dash state and temporary physics modifiers.
-        ghost->m_isShip = real->m_isShip;
-        ghost->m_isBird = real->m_isBird;
-        ghost->m_isBall = real->m_isBall;
-        ghost->m_isDart = real->m_isDart;
-        ghost->m_isRobot = real->m_isRobot;
-        ghost->m_isSpider = real->m_isSpider;
-        ghost->m_isSwing = real->m_isSwing;
+        // Rebuild the clone's active vehicle mode through GD's own mode toggles.
+        // Directly assigning the flags leaves some mode-specific initialization
+        // undone, which is especially visible outside cube mode.
+        ghost->m_isShip = false;
+        ghost->m_isBird = false;
+        ghost->m_isBall = false;
+        ghost->m_isDart = false;
+        ghost->m_isRobot = false;
+        ghost->m_isSpider = false;
+        ghost->m_isSwing = false;
         ghost->m_isPlatformer = real->m_isPlatformer;
+        if (real->m_isShip) ghost->toggleFlyMode(true, true);
+        if (real->m_isBird) ghost->toggleBirdMode(true, true);
+        if (real->m_isBall) ghost->toggleRollMode(true, true);
+        if (real->m_isDart) ghost->toggleDartMode(true, true);
+        if (real->m_isRobot) ghost->toggleRobotMode(true, true);
+        if (real->m_isSpider) ghost->toggleSpiderMode(true, true);
+        if (real->m_isSwing) ghost->toggleSwingMode(true, true);
+
+        // Mode toggles can reset shared flags, so restore the live values after
+        // the clone's mode-specific setup is complete.
+        ghost->m_gravityMod = real->m_gravityMod;
+        ghost->m_isOnGround = real->m_isOnGround;
+        ghost->m_isUpsideDown = real->m_isUpsideDown;
+        ghost->m_vehicleSize = real->m_vehicleSize;
+        ghost->m_playerSpeed = real->m_playerSpeed;
+        ghost->m_isDashing = real->m_isDashing;
+        ghost->m_lastActivatedPortal = real->m_lastActivatedPortal;
         ghost->m_platformerXVelocity = real->m_platformerXVelocity;
         ghost->m_platformerVelocityRelated = real->m_platformerVelocityRelated;
         ghost->m_platformerMovingLeft = real->m_platformerMovingLeft;
