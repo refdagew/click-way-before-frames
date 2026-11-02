@@ -684,16 +684,34 @@ namespace {
         int immediateDeathTick = -1;
         auto immediate = testDelay(layer, real, ghost, down, button, 0, limit,
             releaseAfter, immediateDeathTick);
-        if (immediate == TestResult::Survives) return 0;
-        if (immediate == TestResult::Unsupported) return 0;
+        if (immediate == TestResult::Survives) {
+            log::info("CWBF: immediate P{} {} input survived the {}-tick horizon; no delay selected.",
+                index + 1, down ? "press" : "release", limit);
+            return 0;
+        }
+        if (immediate == TestResult::Unsupported) {
+            log::warn("CWBF: P{} {} input encountered an unsupported interaction; sending immediately.",
+                index + 1, down ? "press" : "release");
+            return 0;
+        }
 
         for (int delay = 1; delay <= limit; ++delay) {
             int candidateDeathTick = -1;
             auto result = testDelay(layer, real, ghost, down, button, delay, limit,
                 releaseAfter, candidateDeathTick);
-            if (result == TestResult::Survives) return delay;
-            if (result == TestResult::Unsupported) return 0;
+            if (result == TestResult::Survives) {
+                log::info("CWBF: selected {}-tick delay for P{} {} input.",
+                    delay, index + 1, down ? "press" : "release");
+                return delay;
+            }
+            if (result == TestResult::Unsupported) {
+                log::warn("CWBF: P{} {} input reached unsupported mechanics while testing delay {}; sending immediately.",
+                    index + 1, down ? "press" : "release", delay);
+                return 0;
+            }
         }
+        log::warn("CWBF: no surviving delay found in 1..{} ticks for P{} {}; sending immediately.",
+            limit, index + 1, down ? "press" : "release");
         return 0;
     }
 
