@@ -1,23 +1,23 @@
 # Click-Way-Before-Frames
 
-An independent Geometry Dash / Geode project.
+An independently written Geometry Dash / Geode project.
 
 ## Interface
 
-Open the pause-menu button to reach one compact panel with one slider: **Maximum early-click delay**, measured in physics ticks. It supports every whole-tick value from 0 to 16,384 in one-tick increments. The selected value is global, shared across player modes, and used for both the delay-search ceiling and the forward prediction horizon.
+Open the pause-menu button to reach one compact panel with one slider: **Maximum early-click delay**, measured in physics ticks. It supports every whole-tick value from 0 to 16,384 in one-tick increments. The same global value controls both the maximum delay tested and the forward simulation horizon across modes. The initial value is 130 ticks, but users may select any value in the range.
 
-Four physics ticks correspond to one 60-FPS frame. This conversion is only informational; the slider itself is tick-based.
+## Full-horizon simulation
 
-## Engine
+Every living candidate advances through the full configured horizon. There is no per-click time limit, total simulation-step cap, landing shortcut, or repeated-collision shortcut. A candidate is rejected early only if its ghost dies before the scheduled input or during the future simulation; after death there is no continuing living trajectory to evaluate.
 
-The Windows build uses an off-screen player clone and the game's player update and collision routines. It first tests the immediate input, then checks delayed timings. Press and release events use the same queued offset to preserve the held duration.
+Large settings may stall the game for a substantial time, especially when many delay offsets must be tested. The mod does not reduce the requested horizon to meet a frame-time budget.
 
-The same player-physics path is used for cube, ship, ball, UFO, wave, robot, spider, and swing. Platformer jump and left/right controls are mapped to the corresponding player buttons. Each player in dual mode has a separate input queue.
+## Current mechanics
 
-The search has an 8 ms time budget and a maximum simulation-work cap. If it cannot finish, it leaves the real input unchanged rather than applying an unverified delay.
+The off-screen player clone uses Geometry Dash player update and collision routines for cube, ship, ball, UFO, wave, robot, spider and swing. Platformer jump and directional controls are mapped into the same player simulation. Press/release input duration is estimated from real input and the delayed events are queued with a shared offset.
 
-## Known boundaries
+The prediction world snapshots and restores supported object/effect activation state and group toggles. It simulates orbs, pads, gravity changes, supported vehicle portals, speed/size portals, simple teleport portals, and group toggles.
 
-- The speculative player still shares the live level's objects. Prediction therefore stops at level-effect interactions (including orbs, pads, portals, and triggers) rather than allowing a test run to mutate the actual level.
-- Large horizons are expensive. The selected slider amount remains the configured limit and horizon, but a computation that exceeds the safety budget passes the input through.
-- The project builds as a Windows .geode package. Runtime behavior has not been verified inside Geometry Dash yet.
+## Unverified interactions
+
+Spawn/move/rotate trigger chains, dual/solo portals, group-parented motion, and complex force/eased teleport configurations are not fully represented. If such an interaction is encountered, the player clone continues consuming the requested horizon while alive, but the trial result is marked unverified and is never counted as a safe result. The build compiles in CI; live in-game behavior has not been runtime tested.
