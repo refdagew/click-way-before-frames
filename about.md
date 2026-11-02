@@ -6,11 +6,11 @@ An independently written Geometry Dash / Geode project.
 
 Open the pause-menu button to reach one compact panel with one slider: **Maximum early-click delay**, measured in physics ticks. It supports every whole-tick value from 0 to 16,384 in one-tick increments. The same global value controls both the maximum delay tested and the forward simulation horizon across modes. The initial value is 130 ticks, but users may select any value in the range.
 
-## Full-horizon simulation
+## Full-horizon, time-sliced search
 
-Every living candidate advances through the full configured horizon. There is no per-click time limit, total simulation-step cap, landing shortcut, or repeated-collision shortcut. A candidate is rejected early only if its ghost dies before the scheduled input or during the future simulation; after death there is no continuing living trajectory to evaluate.
+Every living candidate advances through the full configured horizon. The delay search aims for a roughly 4 ms work slice per player update, saves its progress, and resumes on later updates instead of doing the whole offset scan in the original click callback. The original input and later press/release edges are held until the search resolves.
 
-Large settings may stall the game for a substantial time, especially when many delay offsets must be tested. The mod does not reduce the requested horizon to meet a frame-time budget.
+There is no total simulation-step cap or shortened prediction horizon. One complete candidate is still an indivisible simulation run, so a single candidate at a very large horizon can exceed the 4 ms target. The selected number is never silently reduced to meet a frame-time budget.
 
 ## Current mechanics
 
