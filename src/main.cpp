@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <optional>
@@ -37,10 +38,31 @@ namespace {
         bool isPlayer1 = true;
     };
 
+    struct PendingSearchEdge {
+        uint64_t capturedTick = 0;
+        bool down = false;
+        int button = 1;
+        bool isPlayer1 = true;
+    };
+
+    struct PendingSearch {
+        bool active = false;
+        bool baselineChecked = false;
+        int limit = 0;
+        int nextDelay = 1;
+        int releaseAfter = -1;
+        int button = 1;
+        bool down = false;
+        bool isPlayer1 = true;
+        uint64_t startTick = 0;
+        std::vector<PendingSearchEdge> edges;
+    };
+
     struct PlayerBuffer {
         PlayerObject* ghost = nullptr;
         CCLayer* ghostLayer = nullptr;
         std::deque<QueuedInput> inputs;
+        PendingSearch pendingSearch;
         uint64_t tick = 0;
         float tickRemainder = 0.f;
         int activeShift = 0;
@@ -293,6 +315,7 @@ namespace {
 
     void clearPlayerBuffer(PlayerBuffer& state) {
         state.inputs.clear();
+        state.pendingSearch = {};
         state.activeShift = 0;
         state.tickRemainder = 0.f;
         state.tick = 0;
@@ -328,6 +351,7 @@ namespace {
         }
 
         state.inputs.clear();
+        state.pendingSearch = {};
         state.activeShift = 0;
         state.trackedHeld = false;
         state.pressStartTick = -1;
@@ -384,7 +408,14 @@ namespace {
 
     void seedGhost(PlayerObject* ghost, PlayerObject* real) {
         ghost->setVisible(false);
+
+        // Reset engine bookkeeping from the previous candidate before copying
+        // the current live player state into this prediction timeline.
+        ghost->resetCollisionLog(true);
+        ghost->resetCollisionValues();
+        ghost->resetStateVariables();
         ghost->copyAttributes(real);
+        ghost->m_jumpPadRelated = real->m_jumpPadRelated;
         // Do not inherit ring-contact history from the live player: each
         // prediction starts with a clean collision-contact set.
         ghost->resetTouchedRings(true);
@@ -562,6 +593,12 @@ namespace {
         ghost->update(s_tickDuration);
         ghost->updateRotation(s_tickDuration);
         if (!s_simDied && !ghost->m_isDead) {
+            // Clear per-step collision logs just like the game-facing ghost
+            // implementation; stale lists cause false collisions in later modes.
+            ghost->m_collisionLogTop->removeAllObjects();
+            ghost->m_collisionLogBottom->removeAllObjects();
+            ghost->m_collisionLogLeft->removeAllObjects();
+            ghost->m_collisionLogRight->removeAllObjects();
             layer->checkCollisions(ghost, s_tickDuration, false);
         }
         if ((s_simDied || ghost->m_isDead) && s_simDeathTick < 0) {
@@ -667,52 +704,172 @@ namespace {
         return s_unsupportedInteraction ? TestResult::Unsupported : TestResult::Survives;
     }
 
-    // Returns a positive tick count only when the cloned player survives after
-    // applying the same input later. Zero means "send it normally".
-    int findSafeDelay(PlayLayer* layer, PlayerObject* real, int index, bool down, int button, int releaseAfter) {
-        const int limit = configuredLimit();
-        if (!layer || !real || limit <= 0 || real->m_isDead || !canPredictButton(layer, button)) {
-            return 0;
+    // Keep prediction work near one small frame slice. If the search cannot
+    // finish in this slice, the original input stays queued and the next delays
+    // are tested on a later physics update rather than hitching the click handler.
+    constexpr double SEARCH_SLICE_BUDGET_MS = 4.0;
+
+    struct SearchOutcome {
+        bool pending = false;
+        int delay = 0;
+    };
+
+    SearchOutcome continueSafeDelay(PlayLayer* layer, PlayerObject* real, int index) {
+        auto& state = s_players[index];
+        auto& search = state.pendingSearch;
+        if (!search.active || !layer || !real || real->m_isDead || !state.ghost) {
+            return { false, 0 };
         }
 
-        auto* ghost = createGhost(layer, index);
-        if (!ghost) return 0;
+        auto* ghost = state.ghost;
+        const auto sliceStart = std::chrono::steady_clock::now();
 
-        // There is no time budget, simulation-step cap, landing shortcut, or
-        // repeated-death early-stop heuristic. Every candidate that remains
-        // alive is simulated through the full selected future horizon.
-        int immediateDeathTick = -1;
-        auto immediate = testDelay(layer, real, ghost, down, button, 0, limit,
-            releaseAfter, immediateDeathTick);
-        if (immediate == TestResult::Survives) {
-            log::info("CWBF: immediate P{} {} input survived the {}-tick horizon; no delay selected.",
-                index + 1, down ? "press" : "release", limit);
-            return 0;
-        }
-        if (immediate == TestResult::Unsupported) {
-            log::warn("CWBF: P{} {} input encountered an unsupported interaction; sending immediately.",
-                index + 1, down ? "press" : "release");
-            return 0;
+        // The "click now" baseline is tested only once. On later updates the
+        // real player has moved forward without the held-back input, so repeating
+        // this baseline would test a different moment and waste the search slice.
+        if (!search.baselineChecked) {
+            int immediateDeathTick = -1;
+            auto immediate = testDelay(layer, real, ghost, search.down, search.button, 0,
+                search.limit, search.releaseAfter, immediateDeathTick);
+            search.baselineChecked = true;
+
+            if (immediate == TestResult::Survives) {
+                log::info("CWBF: immediate P{} {} survived the {}-tick horizon; no delay selected.",
+                    index + 1, search.down ? "press" : "release", search.limit);
+                return { false, 0 };
+            }
+            if (immediate == TestResult::Unsupported) {
+                log::warn("CWBF: P{} {} hit unsupported mechanics in the baseline; sending input without buffering.",
+                    index + 1, search.down ? "press" : "release");
+                return { false, 0 };
+            }
         }
 
-        for (int delay = 1; delay <= limit; ++delay) {
+        while (search.nextDelay <= search.limit) {
+            const uint64_t elapsed = state.tick >= search.startTick
+                ? state.tick - search.startTick
+                : 0;
+
+            // A delay that has already passed while the search was resumed
+            // cannot be applied retroactively. Continue with the next possible tick.
+            if (elapsed >= static_cast<uint64_t>(search.nextDelay)) {
+                search.nextDelay = static_cast<int>(elapsed + 1);
+                continue;
+            }
+
+            const int remainingDelay = search.nextDelay - static_cast<int>(elapsed);
             int candidateDeathTick = -1;
-            auto result = testDelay(layer, real, ghost, down, button, delay, limit,
-                releaseAfter, candidateDeathTick);
+            auto result = testDelay(layer, real, ghost, search.down, search.button,
+                remainingDelay, search.limit, search.releaseAfter, candidateDeathTick);
+
             if (result == TestResult::Survives) {
-                log::info("CWBF: selected {}-tick delay for P{} {} input.",
-                    delay, index + 1, down ? "press" : "release");
-                return delay;
+                log::info("CWBF: selected absolute delay {} ticks for P{} {} (resumed after {} ticks).",
+                    search.nextDelay, index + 1, search.down ? "press" : "release", elapsed);
+                return { false, search.nextDelay };
             }
             if (result == TestResult::Unsupported) {
-                log::warn("CWBF: P{} {} input reached unsupported mechanics while testing delay {}; sending immediately.",
-                    index + 1, down ? "press" : "release", delay);
-                return 0;
+                log::warn("CWBF: P{} {} reached unsupported mechanics while testing delay {}; sending without buffering.",
+                    index + 1, search.down ? "press" : "release", search.nextDelay);
+                return { false, 0 };
+            }
+
+            ++search.nextDelay;
+
+            const auto spent = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - sliceStart
+            ).count();
+            if (spent >= SEARCH_SLICE_BUDGET_MS) {
+                break;
             }
         }
-        log::warn("CWBF: no surviving delay found in 1..{} ticks for P{} {}; sending immediately.",
-            limit, index + 1, down ? "press" : "release");
-        return 0;
+
+        const uint64_t elapsed = state.tick >= search.startTick
+            ? state.tick - search.startTick
+            : 0;
+        if (search.nextDelay > search.limit || elapsed >= static_cast<uint64_t>(search.limit)) {
+            log::warn("CWBF: no surviving delay found in 1..{} ticks for P{} {}.",
+                search.limit, index + 1, search.down ? "press" : "release");
+            return { false, 0 };
+        }
+
+        return { true, 0 };
+    }
+
+    void completePendingSearch(PlayerBuffer& state, int chosenDelay) {
+        auto pending = std::move(state.pendingSearch);
+        state.pendingSearch = {};
+
+        if (pending.edges.empty()) {
+            return;
+        }
+
+        if (chosenDelay > 0) {
+            // Apply the same absolute offset to the original edge and every edge
+            // received while the search was being continued.
+            state.activeShift = chosenDelay;
+            for (auto const& edge : pending.edges) {
+                state.inputs.push_back({
+                    edge.capturedTick + static_cast<uint64_t>(chosenDelay),
+                    edge.down,
+                    edge.button,
+                    edge.isPlayer1
+                });
+            }
+        }
+        else {
+            // No delay was safe (or the level contained unsupported mechanics).
+            // Do not lose clicks received while the search was suspended: replay
+            // their edges in order, starting now, one physics tick apart.
+            state.activeShift = 0;
+            uint64_t due = state.tick;
+            for (auto const& edge : pending.edges) {
+                state.inputs.push_back({ due++, edge.down, edge.button, edge.isPlayer1 });
+            }
+        }
+    }
+
+    void advancePendingSearch(PlayLayer* layer, int index) {
+        auto& state = s_players[index];
+        if (!state.pendingSearch.active) {
+            return;
+        }
+
+        auto* real = index == 0 ? layer->m_player1 : layer->m_player2;
+        if (!real || real->m_isDead) {
+            completePendingSearch(state, 0);
+            return;
+        }
+
+        auto result = continueSafeDelay(layer, real, index);
+        if (!result.pending) {
+            completePendingSearch(state, result.delay);
+        }
+    }
+
+    SearchOutcome beginSafeDelay(PlayLayer* layer, PlayerObject* real, int index,
+        bool down, int button, bool isPlayer1, int releaseAfter) {
+        const int limit = configuredLimit();
+        if (!layer || !real || limit <= 0 || real->m_isDead || !canPredictButton(layer, button)) {
+            return { false, 0 };
+        }
+
+        auto& state = s_players[index];
+        if (!createGhost(layer, index)) {
+            return { false, 0 };
+        }
+
+        state.pendingSearch = {};
+        state.pendingSearch.active = true;
+        state.pendingSearch.limit = limit;
+        state.pendingSearch.nextDelay = 1;
+        state.pendingSearch.releaseAfter = releaseAfter;
+        state.pendingSearch.button = button;
+        state.pendingSearch.down = down;
+        state.pendingSearch.isPlayer1 = isPlayer1;
+        state.pendingSearch.startTick = state.tick;
+        state.pendingSearch.edges.push_back({ state.tick, down, button, isPlayer1 });
+
+        return continueSafeDelay(layer, real, index);
     }
 
     void enqueueInput(PlayerBuffer& state, bool down, int button, bool isPlayer1, int newShift = 0) {
@@ -857,6 +1014,11 @@ class $modify(CWBF_PlayerObject, PlayerObject) {
             if (index >= 0) {
                 auto& state = s_players[index];
                 if (dt > 0.0001f && dt < 1.f) s_tickDuration = dt;
+
+                // Continue at most one search slice per PlayerObject update, not
+                // once per physics substep when GD batches several into one frame.
+                advancePendingSearch(layer, index);
+
                 state.tickRemainder += std::max(0.f, dt) / s_tickDuration;
                 while (state.tickRemainder >= 1.f) {
                     state.tickRemainder -= 1.f;
@@ -915,6 +1077,13 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             state.trackedHeld = false;
         }
 
+        // While the predictor is continuing over later updates, hold every edge
+        // and apply the chosen offset to all of them once the search completes.
+        if (state.pendingSearch.active) {
+            state.pendingSearch.edges.push_back({ state.tick, down, button, isPlayer1 });
+            return;
+        }
+
         // Once an early input is queued, keep the same offset for its matching
         // release and any inputs made while that hold is pending.
         if (state.activeShift > 0) {
@@ -930,9 +1099,14 @@ class $modify(CWBF_BaseGameLayer, GJBaseGameLayer) {
             else if (real->m_isSwing) releaseAfter = state.swingHoldTicks;
             else releaseAfter = state.tapHoldTicks;
         }
-        const int delay = findSafeDelay(layer, real, index, down, button, releaseAfter);
-        if (delay > 0) {
-            enqueueInput(state, down, button, isPlayer1, delay);
+        auto result = beginSafeDelay(layer, real, index, down, button, isPlayer1, releaseAfter);
+        if (result.pending) {
+            return; // the original event is held while the search resumes next update
+        }
+
+        state.pendingSearch = {};
+        if (result.delay > 0) {
+            enqueueInput(state, down, button, isPlayer1, result.delay);
             return;
         }
 
