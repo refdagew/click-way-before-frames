@@ -9,7 +9,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <deque>
@@ -602,14 +601,20 @@ namespace {
         s_simDied = false;
         s_unsupportedInteraction = false;
         s_simulating = true;
+        auto finishSimulation = [&]() {
+            s_simulating = false;
+            restorePredictionWorld();
+            ghost->stopAllActions();
+            ghost->stopParticles();
+        };
+
 
         // Advance the player with the original button state until the candidate
         // input's scheduled tick. If the player dies before then, this candidate
         // cannot possibly be saved by a later input.
         for (int tick = 0; tick < delay; ++tick) {
             if (!ghostStep(layer, ghost)) {
-                s_simulating = false;
-                restorePredictionWorld();
+                finishSimulation();
                 deathTick = s_simDeathTick;
                 return TestResult::Dies;
             }
@@ -626,17 +631,13 @@ namespace {
                 ghost->releaseButton(playerButton);
             }
             if (!ghostStep(layer, ghost)) {
-                s_simulating = false;
-                restorePredictionWorld();
+                finishSimulation();
                 deathTick = s_simDeathTick;
                 return TestResult::Dies;
             }
         }
 
-        s_simulating = false;
-        restorePredictionWorld();
-        ghost->stopAllActions();
-        ghost->stopParticles();
+        finishSimulation();
         return s_unsupportedInteraction ? TestResult::Unsupported : TestResult::Survives;
     }
 
